@@ -16,9 +16,44 @@ const {
   GroupBookingController,
 } = require("./controllers/group-booking-controller");
 const CatalogController = require("./controllers/catalog-controller");
+const CompanyController = require("./controllers/company-controller");
 const { optionalAuth } = require("../../middleware/auth-middleware");
 
 const router = express.Router({ mergeParams: true });
+
+// COMPANIES
+// =========
+
+router.post("/companies/register", CompanyController.register);
+router.post(
+  "/companies/resend-verification",
+  CompanyController.resendVerification,
+);
+router.get(
+  "/companies",
+  AuthenticationController.isSignedIn,
+  CompanyController.getCompanies,
+);
+router.get(
+  "/companies/mine",
+  AuthenticationController.isSignedIn,
+  CompanyController.getMyCompany,
+);
+router.get(
+  "/companies/:id",
+  AuthenticationController.isSignedIn,
+  CompanyController.getCompany,
+);
+router.post(
+  "/companies/:id/verify",
+  AuthenticationController.isSignedIn,
+  CompanyController.verify,
+);
+router.post(
+  "/companies/:id/block",
+  AuthenticationController.isSignedIn,
+  CompanyController.block,
+);
 
 // BOOKABLES
 // =========
