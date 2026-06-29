@@ -256,6 +256,20 @@ describe("CompanyService", () => {
       ).to.equal(true);
     });
 
+    it("un-suspends the member user accounts (unblock path)", async () => {
+      CompanyManager.getCompany.resolves({ id: "c1", status: "blocked" });
+      CompanyMemberManager.getMembersByCompany.resolves([{ userId: "a@x.de" }]);
+      UserManager.getUserBy.resolves({ id: "a@x.de", isSuspended: true });
+
+      await CompanyService.verifyCompany("kielregion", "c1");
+
+      expect(UserManager.getUserBy.calledWith({ id: "a@x.de" }, true)).to.equal(
+        true,
+      );
+      const saved = UserManager.updateUser.firstCall.args[0];
+      expect(saved.isSuspended).to.equal(false);
+    });
+
     it("throws 404 when the company does not exist", async () => {
       CompanyManager.getCompany.resolves(null);
       let error;
@@ -283,6 +297,20 @@ describe("CompanyService", () => {
       expect(
         CompanyManager.setStatus.calledWith("kielregion", "c1", "blocked"),
       ).to.equal(true);
+    });
+
+    it("suspends the member user accounts so they can no longer log in", async () => {
+      CompanyManager.getCompany.resolves({ id: "c1", status: "verified" });
+      CompanyMemberManager.getMembersByCompany.resolves([{ userId: "a@x.de" }]);
+      UserManager.getUserBy.resolves({ id: "a@x.de", isSuspended: false });
+
+      await CompanyService.blockCompany("kielregion", "c1");
+
+      expect(UserManager.getUserBy.calledWith({ id: "a@x.de" }, true)).to.equal(
+        true,
+      );
+      const saved = UserManager.updateUser.firstCall.args[0];
+      expect(saved.isSuspended).to.equal(true);
     });
   });
 

@@ -116,6 +116,25 @@ router.delete(
   CompanyController.removeBranchLogo,
 );
 router.post(
+  "/companies/:id/members/invite",
+  AuthenticationController.isSignedIn,
+  CompanyController.inviteMember,
+);
+router.get(
+  "/companies/:id/members",
+  AuthenticationController.isSignedIn,
+  CompanyController.listMembers,
+);
+router.delete(
+  "/companies/:id/members/:userId",
+  AuthenticationController.isSignedIn,
+  CompanyController.removeMember,
+);
+router.post(
+  "/member-invitations/:token/accept",
+  CompanyController.acceptInvitation,
+);
+router.post(
   "/companies/:id/verify",
   AuthenticationController.isSignedIn,
   CompanyController.verify,

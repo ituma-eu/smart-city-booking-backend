@@ -26,6 +26,10 @@ class CompanyMemberManager {
     );
     return memberEntity;
   }
+
+  static async removeMember(tenantId, companyId, userId) {
+    await CompanyMemberModel.deleteOne({ tenantId, companyId, userId });
+  }
 }
 
 module.exports = CompanyMemberManager;

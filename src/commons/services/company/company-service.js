@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const { v4: uuidv4 } = require("uuid");
 const { User, USER_HOOK_TYPES } = require("../../entities/user/user");
 const UserManager = require("../../data-managers/user-manager");
@@ -8,8 +9,10 @@ const CompanyManager = require("../../data-managers/company-manager");
 const CompanyMemberManager = require("../../data-managers/company-member-manager");
 const CompanyMediaManager = require("../../data-managers/company-media-manager");
 const CompanyBranchManager = require("../../data-managers/company-branch-manager");
+const MemberInvitationManager = require("../../data-managers/member-invitation-manager");
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
 const { CompanyRoleService } = require("./company-role-service");
+const MailController = require("../../mail-service/mail-controller");
 const { isEmail } = require("validator");
 
 async function assertTaxonomyRef(tenantId, id, type, label) {
@@ -20,6 +23,15 @@ async function assertTaxonomyRef(tenantId, id, type, label) {
   if (!term || term.type !== type || !term.active) {
     throw { message: `Invalid ${label}`, status: 400 };
   }
+}
+
+async function setUserSuspended(userId, suspended) {
+  const user = await UserManager.getUserBy({ id: userId }, true);
+  if (!user) {
+    return;
+  }
+  user.isSuspended = suspended;
+  await UserManager.updateUser(user);
 }
 
 async function findBranchOrThrow(tenantId, companyId, branchId) {
@@ -127,6 +139,19 @@ function toBranchDto(branch) {
     lng: coords ? coords[0] : null,
     logoUrl: branch.logoUrl,
     created: branch.created,
+  };
+}
+
+function toMemberInvitationDto(invitation) {
+  return {
+    userId: invitation.email,
+    email: invitation.email,
+    firstName: invitation.firstName,
+    lastName: invitation.lastName,
+    phone: invitation.phone,
+    branchId: invitation.branchId || "",
+    isOwner: false,
+    status: "pending",
   };
 }
 
@@ -285,6 +310,7 @@ class CompanyService {
         member.userId,
         role.id,
       );
+      await setUserSuspended(member.userId, false);
     }
 
     await CompanyManager.setStatus(tenantId, companyId, "verified");
@@ -305,6 +331,7 @@ class CompanyService {
       await MembershipManager.updateMembership(tenantId, member.userId, {
         status: "suspended",
       });
+      await setUserSuspended(member.userId, true);
     }
 
     await CompanyManager.setStatus(tenantId, companyId, "blocked");
@@ -469,6 +496,17 @@ class CompanyService {
         status: 409,
       };
     }
+    const pendingInvitations =
+      await MemberInvitationManager.getPendingByCompany(tenantId, companyId);
+    if (
+      pendingInvitations.some((invitation) => invitation.branchId === branchId)
+    ) {
+      throw {
+        message:
+          "Branch still has a pending invitation assigned; cancel it before deleting the branch",
+        status: 409,
+      };
+    }
     const count = await CompanyBranchManager.countByCompany(
       tenantId,
       companyId,
@@ -488,6 +526,213 @@ class CompanyService {
 
   static async removeBranchLogo(tenantId, companyId, branchId) {
     return CompanyService.setBranchLogo(tenantId, companyId, branchId, "");
+  }
+
+  static async inviteMember(tenantId, companyId, invitedBy, payload) {
+    const company = await CompanyManager.getCompany(tenantId, companyId);
+    if (!company) {
+      throw { message: "Company not found", status: 404 };
+    }
+    const email = String(payload.email || "")
+      .trim()
+      .toLowerCase();
+    const firstName = String(payload.firstName || "").trim();
+    const lastName = String(payload.lastName || "").trim();
+    if (!email || !firstName || !lastName) {
+      throw {
+        message: "First name, last name and email are required",
+        status: 400,
+      };
+    }
+    if (!isEmail(email)) {
+      throw { message: "Invalid email", status: 400 };
+    }
+    const branchId = payload.branchId || "";
+    if (branchId) {
+      const branch = await CompanyBranchManager.getBranch(tenantId, branchId);
+      if (!branch || branch.companyId !== companyId) {
+        throw { message: "Invalid branch", status: 400 };
+      }
+    }
+    const existingMember = await CompanyMemberManager.getMemberByUser(
+      tenantId,
+      email,
+    );
+    if (existingMember) {
+      throw { message: "This user already belongs to a company", status: 409 };
+    }
+    const pending = await MemberInvitationManager.getPendingByEmailInTenant(
+      tenantId,
+      email,
+    );
+    if (pending) {
+      throw {
+        message: "An invitation for this email is already pending",
+        status: 409,
+      };
+    }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const invitation = await MemberInvitationManager.store({
+      id: uuidv4(),
+      tenantId,
+      companyId,
+      token,
+      email,
+      firstName,
+      lastName,
+      phone: String(payload.phone || "").trim(),
+      branchId,
+      status: "pending",
+      invitedBy,
+    });
+
+    try {
+      await MailController.sendMemberInvitation({
+        sendTo: email,
+        companyName: company.name,
+        token,
+      });
+    } catch {
+      // mail is best-effort; the pending invitation can be re-sent or accepted via its link
+    }
+
+    return toMemberInvitationDto(invitation);
+  }
+
+  static async listCompanyMembers(tenantId, companyId) {
+    const members = await CompanyMemberManager.getMembersByCompany(
+      tenantId,
+      companyId,
+    );
+    const active = [];
+    for (const member of members) {
+      const user = await UserManager.getUserBy({ id: member.userId });
+      active.push({
+        userId: member.userId,
+        email: member.userId,
+        firstName: user ? user.firstName : "",
+        lastName: user ? user.lastName : "",
+        phone: user ? user.phone : "",
+        branchId: member.branchId || "",
+        isOwner: member.isOwner === true,
+        status: "active",
+      });
+    }
+    const invitations = await MemberInvitationManager.getPendingByCompany(
+      tenantId,
+      companyId,
+    );
+    return [...active, ...invitations.map(toMemberInvitationDto)];
+  }
+
+  static async removeCompanyMember(tenantId, companyId, targetUserId) {
+    const userId = String(targetUserId || "")
+      .trim()
+      .toLowerCase();
+    const member = await CompanyMemberManager.getMemberByUser(tenantId, userId);
+    if (member && member.companyId === companyId) {
+      if (member.isOwner === true) {
+        throw { message: "The company owner cannot be removed", status: 403 };
+      }
+      await CompanyMemberManager.removeMember(tenantId, companyId, userId);
+      await MembershipManager.removeMembership(tenantId, userId);
+      await UserManager.deleteUser(userId);
+      return { removed: userId };
+    }
+    const pending = await MemberInvitationManager.getPendingByEmail(
+      tenantId,
+      companyId,
+      userId,
+    );
+    if (pending) {
+      await MemberInvitationManager.remove(tenantId, pending.id);
+      return { removed: userId };
+    }
+    throw { message: "Member not found", status: 404 };
+  }
+
+  static async acceptMemberInvitation(tenantId, token, password) {
+    const invitation = await MemberInvitationManager.getByToken(token);
+    if (
+      !invitation ||
+      invitation.tenantId !== tenantId ||
+      invitation.status !== "pending"
+    ) {
+      throw { message: "Invalid or expired invitation", status: 404 };
+    }
+    if (!password || String(password).length < 8) {
+      throw { message: "Password must be at least 8 characters", status: 400 };
+    }
+    const email = invitation.email;
+    const company = await CompanyManager.getCompany(
+      tenantId,
+      invitation.companyId,
+    );
+    if (!company) {
+      throw { message: "Company not found", status: 404 };
+    }
+
+    const alreadyMember = await CompanyMemberManager.getMemberByUser(
+      tenantId,
+      email,
+    );
+    if (alreadyMember) {
+      throw { message: "This user already belongs to a company", status: 409 };
+    }
+
+    const existingUser = await UserManager.getUserBy({ id: email }, true);
+    if (!existingUser) {
+      const user = new User({
+        id: email,
+        firstName: invitation.firstName,
+        lastName: invitation.lastName,
+        phone: invitation.phone,
+        company: company.name,
+      });
+      user.setPassword(password);
+      user.isVerified = true;
+      await UserManager.createUser(user);
+    }
+
+    const role = await CompanyRoleService.ensureUnternehmenRole(tenantId);
+    const membership = await MembershipManager.getMembershipByTenantAndUserID(
+      tenantId,
+      email,
+    );
+    if (!membership) {
+      await MembershipManager.addMembership(tenantId, {
+        userId: email,
+        source: "invite",
+        status: "active",
+        owner: false,
+      });
+    } else {
+      await MembershipManager.updateMembership(tenantId, email, {
+        status: "active",
+      });
+    }
+    await MembershipManager.addRoleToMembership(tenantId, email, role.id);
+
+    let branchId = invitation.branchId || "";
+    if (branchId) {
+      const branch = await CompanyBranchManager.getBranch(tenantId, branchId);
+      if (!branch || branch.companyId !== invitation.companyId) {
+        branchId = "";
+      }
+    }
+
+    await CompanyMemberManager.storeMember({
+      id: uuidv4(),
+      tenantId,
+      companyId: invitation.companyId,
+      userId: email,
+      isOwner: false,
+      branchId,
+    });
+
+    await MemberInvitationManager.remove(tenantId, invitation.id);
+    return { companyId: invitation.companyId, userId: email };
   }
 }
 

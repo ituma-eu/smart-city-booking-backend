@@ -699,6 +699,99 @@ class CompanyController {
     }
   }
 
+  static async inviteMember(request, response) {
+    try {
+      const { tenant: tenantId, id: companyId } = request.params;
+      if (
+        !(await CompanyController.isOwnerOrAdmin(
+          request.user.id,
+          tenantId,
+          companyId,
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
+      const invitation = await CompanyService.inviteMember(
+        tenantId,
+        companyId,
+        request.user.id,
+        request.body,
+      );
+      return response.status(201).send(invitation);
+    } catch (error) {
+      logger.error("Could not invite member", error);
+      return response
+        .status(error.status || 500)
+        .send(error.message || "Could not invite member");
+    }
+  }
+
+  static async listMembers(request, response) {
+    try {
+      const { tenant: tenantId, id: companyId } = request.params;
+      if (
+        !(await CompanyController.isMemberOrAdmin(
+          request.user.id,
+          tenantId,
+          companyId,
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
+      const members = await CompanyService.listCompanyMembers(
+        tenantId,
+        companyId,
+      );
+      return response.status(200).send(members);
+    } catch (error) {
+      logger.error(error);
+      return response.sendStatus(500);
+    }
+  }
+
+  static async removeMember(request, response) {
+    try {
+      const { tenant: tenantId, id: companyId, userId } = request.params;
+      if (
+        !(await CompanyController.isOwnerOrAdmin(
+          request.user.id,
+          tenantId,
+          companyId,
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
+      const result = await CompanyService.removeCompanyMember(
+        tenantId,
+        companyId,
+        userId,
+      );
+      return response.status(200).send(result);
+    } catch (error) {
+      logger.error("Could not remove member", error);
+      return response
+        .status(error.status || 500)
+        .send(error.message || "Could not remove member");
+    }
+  }
+
+  static async acceptInvitation(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      const result = await CompanyService.acceptMemberInvitation(
+        tenantId,
+        request.params.token,
+        request.body.password,
+      );
+      return response.status(200).send(result);
+    } catch (error) {
+      logger.error("Could not accept invitation", error);
+      return response
+        .status(error.status || 500)
+        .send(error.message || "Could not accept invitation");
+    }
+  }
+
   static async isTenantAdmin(userId, tenantId) {
     return PermissionService._allowUpdateAny(
       userId,

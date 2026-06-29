@@ -68,6 +68,14 @@ describe("CompanyController — authz & handlers", () => {
       removeCompanyBranch: sandbox.stub().resolves({ id: "b1", logoUrl: "" }),
       setBranchLogo: sandbox.stub().resolves({ id: "b1" }),
       removeBranchLogo: sandbox.stub().resolves({ id: "b1", logoUrl: "" }),
+      inviteMember: sandbox
+        .stub()
+        .resolves({ userId: "m@x.de", status: "pending" }),
+      listCompanyMembers: sandbox.stub().resolves([]),
+      removeCompanyMember: sandbox.stub().resolves({ removed: "m@x.de" }),
+      acceptMemberInvitation: sandbox
+        .stub()
+        .resolves({ companyId: "c1", userId: "m@x.de" }),
     };
     CompanyManager = {
       getCompany: sandbox
@@ -746,6 +754,147 @@ describe("CompanyController — authz & handlers", () => {
         );
         expect(r.statusCode).to.equal(403);
         expect(CompanyService.removeBranchLogo.called).to.equal(false);
+      });
+    });
+  });
+
+  describe("members — invite / list / remove / accept authz", () => {
+    describe("invite (owner or admin)", () => {
+      it("owner invites (201)", async () => {
+        asOwnerOf("c1");
+        const r = res();
+        await CompanyController.inviteMember(
+          req({ body: { email: "m@x.de", firstName: "M", lastName: "X" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(201);
+        expect(CompanyService.inviteMember.calledOnce).to.equal(true);
+      });
+
+      it("admin invites (201)", async () => {
+        asAdmin();
+        const r = res();
+        await CompanyController.inviteMember(req({ body: {} }), r);
+        expect(r.statusCode).to.equal(201);
+      });
+
+      it("a non-owner member cannot invite (403)", async () => {
+        asMemberOf("c1");
+        const r = res();
+        await CompanyController.inviteMember(req({ body: {} }), r);
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.inviteMember.called).to.equal(false);
+      });
+
+      it("a member of another company cannot invite (403)", async () => {
+        asOwnerOf("other-company");
+        const r = res();
+        await CompanyController.inviteMember(req({ body: {} }), r);
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.inviteMember.called).to.equal(false);
+      });
+
+      it("a stranger cannot invite (403)", async () => {
+        const r = res();
+        await CompanyController.inviteMember(req({ body: {} }), r);
+        expect(r.statusCode).to.equal(403);
+      });
+    });
+
+    describe("list (member or admin)", () => {
+      it("a member can list (200)", async () => {
+        asMemberOf("c1");
+        const r = res();
+        await CompanyController.listMembers(req(), r);
+        expect(r.statusCode).to.equal(200);
+      });
+
+      it("a stranger cannot list (403)", async () => {
+        const r = res();
+        await CompanyController.listMembers(req(), r);
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.listCompanyMembers.called).to.equal(false);
+      });
+
+      it("a member of another company cannot list (403)", async () => {
+        asMemberOf("other-company");
+        const r = res();
+        await CompanyController.listMembers(req(), r);
+        expect(r.statusCode).to.equal(403);
+      });
+    });
+
+    describe("remove (owner or admin)", () => {
+      it("owner removes a member (200)", async () => {
+        asOwnerOf("c1");
+        const r = res();
+        await CompanyController.removeMember(
+          req({ params: { userId: "m@x.de" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(200);
+        expect(r.body).to.deep.equal({ removed: "m@x.de" });
+      });
+
+      it("a non-owner member cannot remove (403)", async () => {
+        asMemberOf("c1");
+        const r = res();
+        await CompanyController.removeMember(
+          req({ params: { userId: "m@x.de" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.removeCompanyMember.called).to.equal(false);
+      });
+
+      it("a member of another company cannot remove (403)", async () => {
+        asOwnerOf("other-company");
+        const r = res();
+        await CompanyController.removeMember(
+          req({ params: { userId: "m@x.de" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.removeCompanyMember.called).to.equal(false);
+      });
+
+      it("surfaces the owner-cannot-be-removed 403 from the service", async () => {
+        asOwnerOf("c1");
+        CompanyService.removeCompanyMember.rejects({
+          status: 403,
+          message: "The company owner cannot be removed",
+        });
+        const r = res();
+        await CompanyController.removeMember(
+          req({ params: { userId: "owner@x.de" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+      });
+    });
+
+    describe("accept (public, token)", () => {
+      it("accepts an invitation (200)", async () => {
+        const r = res();
+        await CompanyController.acceptInvitation(
+          req({ params: { token: "tok" }, body: { password: "secret123" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(200);
+        expect(r.body).to.deep.equal({ companyId: "c1", userId: "m@x.de" });
+      });
+
+      it("surfaces a 404 for an invalid token", async () => {
+        CompanyService.acceptMemberInvitation.rejects({
+          status: 404,
+          message: "Invalid or expired invitation",
+        });
+        const r = res();
+        await CompanyController.acceptInvitation(
+          req({ params: { token: "bad" }, body: { password: "secret123" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(404);
       });
     });
   });

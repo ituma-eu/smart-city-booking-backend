@@ -8,6 +8,7 @@ describe("CompanyService — branches", () => {
   let CompanyBranchManager;
   let TaxonomyTermManager;
   let CompanyMemberManager;
+  let MemberInvitationManager;
   let CompanyService;
 
   const existingBranch = () => ({
@@ -40,6 +41,9 @@ describe("CompanyService — branches", () => {
     CompanyMemberManager = {
       getMembersByCompany: sandbox.stub().resolves([]),
     };
+    MemberInvitationManager = {
+      getPendingByCompany: sandbox.stub().resolves([]),
+    };
 
     mock("../../src/commons/data-managers/company-manager", CompanyManager);
     mock(
@@ -53,6 +57,10 @@ describe("CompanyService — branches", () => {
     mock(
       "../../src/commons/data-managers/company-member-manager",
       CompanyMemberManager,
+    );
+    mock(
+      "../../src/commons/data-managers/member-invitation-manager",
+      MemberInvitationManager,
     );
 
     CompanyService = mock.reRequire(
@@ -325,6 +333,32 @@ describe("CompanyService — branches", () => {
       CompanyMemberManager.getMembersByCompany.resolves([
         { userId: "owner@x.de", branchId: "" },
         { userId: "u2@x.de", branchId: "b2" },
+      ]);
+      await CompanyService.removeCompanyBranch("kielregion", "c1", "b1");
+      expect(
+        CompanyBranchManager.removeBranch.calledWith("kielregion", "b1"),
+      ).to.equal(true);
+    });
+
+    it("throws 409 when a pending invitation is scoped to this branch", async () => {
+      CompanyBranchManager.getBranch.resolves(existingBranch());
+      CompanyBranchManager.countByCompany.resolves(2);
+      MemberInvitationManager.getPendingByCompany.resolves([
+        { email: "invitee@x.de", branchId: "b1" },
+      ]);
+      await expectStatus(
+        () => CompanyService.removeCompanyBranch("kielregion", "c1", "b1"),
+        409,
+        "pending invitation",
+      );
+      expect(CompanyBranchManager.removeBranch.called).to.equal(false);
+    });
+
+    it("allows deletion when a pending invitation targets a different branch", async () => {
+      CompanyBranchManager.getBranch.resolves(existingBranch());
+      CompanyBranchManager.countByCompany.resolves(2);
+      MemberInvitationManager.getPendingByCompany.resolves([
+        { email: "invitee@x.de", branchId: "b2" },
       ]);
       await CompanyService.removeCompanyBranch("kielregion", "c1", "b1");
       expect(
