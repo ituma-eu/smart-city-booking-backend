@@ -6,8 +6,10 @@ const MembershipManager = require("../../data-managers/membership-manager");
 const TenantManager = require("../../data-managers/tenant-manager");
 const CompanyManager = require("../../data-managers/company-manager");
 const CompanyMemberManager = require("../../data-managers/company-member-manager");
+const CompanyMediaManager = require("../../data-managers/company-media-manager");
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
 const { CompanyRoleService } = require("./company-role-service");
+const { isEmail } = require("validator");
 
 async function assertTaxonomyRef(tenantId, id, type, label) {
   if (!id) {
@@ -198,6 +200,107 @@ class CompanyService {
 
     await CompanyManager.setStatus(tenantId, companyId, "blocked");
     return CompanyManager.getCompany(tenantId, companyId);
+  }
+
+  static async updateCompanyProfile(tenantId, companyId, payload) {
+    const company = await CompanyManager.getCompany(tenantId, companyId);
+    if (!company) {
+      throw { message: "Company not found", status: 404 };
+    }
+
+    const name = String(payload.name || "").trim();
+    if (!name || name.length > 200) {
+      throw { message: "Company name is required (max 200)", status: 400 };
+    }
+    const website =
+      payload.website !== undefined
+        ? String(payload.website).trim()
+        : undefined;
+    if (website && !/^https:\/\/\S+$/.test(website)) {
+      throw { message: "Website must be a valid https:// URL", status: 400 };
+    }
+    if (payload.mail && !isEmail(String(payload.mail))) {
+      throw { message: "Invalid contact email", status: 400 };
+    }
+    await assertTaxonomyRef(tenantId, payload.districtId, "district", "Kreis");
+    await assertTaxonomyRef(
+      tenantId,
+      payload.industryId,
+      "industry",
+      "Branche",
+    );
+    await assertTaxonomyRef(
+      tenantId,
+      payload.sizeId,
+      "company_size",
+      "Unternehmensgröße",
+    );
+
+    const pick = (key) =>
+      payload[key] !== undefined ? payload[key] : company[key];
+
+    const updated = {
+      ...company,
+      name,
+      slug: pick("slug"),
+      mail: pick("mail"),
+      phone: pick("phone"),
+      website: website !== undefined ? website : company.website,
+      street: pick("street"),
+      postalCode: pick("postalCode"),
+      city: pick("city"),
+      districtId: pick("districtId"),
+      industryId: pick("industryId"),
+      sizeId: pick("sizeId"),
+      description:
+        payload.description !== undefined
+          ? String(payload.description)
+          : company.description,
+    };
+
+    await CompanyManager.storeCompany(updated);
+    return CompanyManager.getCompany(tenantId, companyId);
+  }
+
+  static async setCompanyLogo(tenantId, companyId, logoUrl) {
+    const company = await CompanyManager.getCompany(tenantId, companyId);
+    if (!company) {
+      throw { message: "Company not found", status: 404 };
+    }
+    await CompanyManager.setLogo(tenantId, companyId, logoUrl);
+    return CompanyManager.getCompany(tenantId, companyId);
+  }
+
+  static async removeCompanyLogo(tenantId, companyId) {
+    return CompanyService.setCompanyLogo(tenantId, companyId, "");
+  }
+
+  static async getCompanyMedia(tenantId, companyId) {
+    return CompanyMediaManager.getMediaByCompany(tenantId, companyId);
+  }
+
+  static async addCompanyMedia(tenantId, companyId, media) {
+    const company = await CompanyManager.getCompany(tenantId, companyId);
+    if (!company) {
+      throw { message: "Company not found", status: 404 };
+    }
+    return CompanyMediaManager.storeMedia({
+      id: uuidv4(),
+      tenantId,
+      companyId,
+      url: media.url,
+      fileName: media.fileName,
+      type: media.type,
+    });
+  }
+
+  static async removeCompanyMedia(tenantId, companyId, mediaId) {
+    const media = await CompanyMediaManager.getMedia(tenantId, mediaId);
+    if (!media || media.companyId !== companyId) {
+      throw { message: "Media not found", status: 404 };
+    }
+    await CompanyMediaManager.removeMedia(tenantId, mediaId);
+    return media;
   }
 }
 

@@ -29,6 +29,10 @@ class CompanyManager {
   static async setStatus(tenantId, id, status) {
     await CompanyModel.updateOne({ tenantId, id }, { $set: { status } });
   }
+
+  static async setLogo(tenantId, id, logoUrl) {
+    await CompanyModel.updateOne({ tenantId, id }, { $set: { logoUrl } });
+  }
 }
 
 module.exports = CompanyManager;

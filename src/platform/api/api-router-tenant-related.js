@@ -40,9 +40,45 @@ router.get(
   CompanyController.getMyCompany,
 );
 router.get(
+  "/me/context",
+  AuthenticationController.isSignedIn,
+  CompanyController.getMyContext,
+);
+router.get(
   "/companies/:id",
   AuthenticationController.isSignedIn,
   CompanyController.getCompany,
+);
+router.get("/companies/:id/public", CompanyController.getPublicCompany);
+router.put(
+  "/companies/:id",
+  AuthenticationController.isSignedIn,
+  CompanyController.updateProfile,
+);
+router.post(
+  "/companies/:id/logo",
+  AuthenticationController.isSignedIn,
+  CompanyController.uploadLogo,
+);
+router.delete(
+  "/companies/:id/logo",
+  AuthenticationController.isSignedIn,
+  CompanyController.removeLogo,
+);
+router.get(
+  "/companies/:id/media",
+  AuthenticationController.isSignedIn,
+  CompanyController.listMedia,
+);
+router.post(
+  "/companies/:id/media",
+  AuthenticationController.isSignedIn,
+  CompanyController.uploadMedia,
+);
+router.delete(
+  "/companies/:id/media/:mediaId",
+  AuthenticationController.isSignedIn,
+  CompanyController.removeMedia,
 );
 router.post(
   "/companies/:id/verify",
