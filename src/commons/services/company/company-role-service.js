@@ -3,26 +3,6 @@ const { RoleManager } = require("../../data-managers/role-manager");
 
 const UNTERNEHMEN_ROLE_ID = "unternehmen";
 
-const OWN_MANAGE = {
-  create: true,
-  readOwn: true,
-  readAny: false,
-  updateOwn: true,
-  updateAny: false,
-  deleteOwn: true,
-  deleteAny: false,
-};
-
-const READ_OWN = {
-  create: false,
-  readOwn: true,
-  readAny: false,
-  updateOwn: false,
-  updateAny: false,
-  deleteOwn: false,
-  deleteAny: false,
-};
-
 class CompanyRoleService {
   static async ensureUnternehmenRole(tenantId) {
     const existing = await RoleManager.getRole(UNTERNEHMEN_ROLE_ID, tenantId);
@@ -30,13 +10,13 @@ class CompanyRoleService {
       return existing;
     }
 
+    // Company users are authorized through company_members + /me/context, not the
+    // legacy booking RBAC, so this role grants no legacy permissions.
     const role = Role.create({
       id: UNTERNEHMEN_ROLE_ID,
       name: "Unternehmen",
       tenantId,
       adminInterfaces: [],
-      manageBookables: { ...OWN_MANAGE },
-      manageBookings: { ...READ_OWN },
     });
 
     return RoleManager.storeRole(role, tenantId);
