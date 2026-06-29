@@ -422,6 +422,35 @@ class UserController {
     }
   }
 
+  static async changeMyPassword(request, response) {
+    try {
+      const { currentPassword, newPassword } = request.body;
+      if (!currentPassword || !newPassword) {
+        return response
+          .status(400)
+          .send("Current and new password are required");
+      }
+      if (String(newPassword).length < 8) {
+        return response
+          .status(400)
+          .send("Password must be at least 8 characters");
+      }
+      const user = await UserManager.getUserBy({ id: request.user.id }, true);
+      if (!user) {
+        return response.sendStatus(404);
+      }
+      if (!user.verifyPassword(currentPassword)) {
+        return response.status(403).send("Current password is incorrect");
+      }
+      user.setPassword(newPassword);
+      await UserManager.updateUser(user);
+      return response.sendStatus(200);
+    } catch (error) {
+      logger.error(error);
+      return response.status(500).send("could not change password");
+    }
+  }
+
   /**
    * Retrieves a list of user IDs based on the specified roles.
    *

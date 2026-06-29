@@ -210,6 +210,11 @@ router.put(
   AuthenticationController.isSignedIn,
   UserController.updateMe,
 );
+router.put(
+  "/user/password",
+  AuthenticationController.isSignedIn,
+  UserController.changeMyPassword,
+);
 router.delete(
   "/users/:id",
   AuthenticationController.isSignedIn,
