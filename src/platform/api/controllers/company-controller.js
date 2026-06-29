@@ -479,6 +479,226 @@ class CompanyController {
     }
   }
 
+  static async listBranches(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      const companyId = request.params.id;
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!access.isAdmin && !access.member) {
+        return response.sendStatus(403);
+      }
+      const branches = await CompanyService.getCompanyBranches(
+        tenantId,
+        companyId,
+      );
+      return response.status(200).send(branches);
+    } catch (error) {
+      logger.error(error);
+      return response.sendStatus(500);
+    }
+  }
+
+  static async getBranch(request, response) {
+    try {
+      const { tenant: tenantId, id: companyId, branchId } = request.params;
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!access.isAdmin && !access.member) {
+        return response.sendStatus(403);
+      }
+      const branch = await CompanyService.getCompanyBranch(
+        tenantId,
+        companyId,
+        branchId,
+      );
+      return response.status(200).send(branch);
+    } catch (error) {
+      logger.error("Could not get branch", error);
+      return response
+        .status(error.status || 500)
+        .send(error.message || "Could not get branch");
+    }
+  }
+
+  static async createBranch(request, response) {
+    try {
+      const { tenant: tenantId, id: companyId } = request.params;
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!access.isAdmin && !(access.member && access.member.isOwner)) {
+        return response.sendStatus(403);
+      }
+      const branch = await CompanyService.createCompanyBranch(
+        tenantId,
+        companyId,
+        request.body,
+      );
+      return response.status(201).send(branch);
+    } catch (error) {
+      logger.error("Could not create branch", error);
+      return response
+        .status(error.status || 500)
+        .send(error.message || "Could not create branch");
+    }
+  }
+
+  static async updateBranch(request, response) {
+    try {
+      const { tenant: tenantId, id: companyId, branchId } = request.params;
+      if (
+        !(await CompanyController.canEditBranch(
+          request.user.id,
+          tenantId,
+          companyId,
+          branchId,
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
+      const branch = await CompanyService.updateCompanyBranch(
+        tenantId,
+        companyId,
+        branchId,
+        request.body,
+      );
+      return response.status(200).send(branch);
+    } catch (error) {
+      logger.error("Could not update branch", error);
+      return response
+        .status(error.status || 500)
+        .send(error.message || "Could not update branch");
+    }
+  }
+
+  static async removeBranch(request, response) {
+    try {
+      const { tenant: tenantId, id: companyId, branchId } = request.params;
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!access.isAdmin && !(access.member && access.member.isOwner)) {
+        return response.sendStatus(403);
+      }
+      const branch = await CompanyService.removeCompanyBranch(
+        tenantId,
+        companyId,
+        branchId,
+      );
+      await CompanyController._deleteLogoFile(tenantId, branch.logoUrl);
+      return response.status(200).send({ id: branch.id });
+    } catch (error) {
+      logger.error("Could not remove branch", error);
+      return response
+        .status(error.status || 500)
+        .send(error.message || "Could not remove branch");
+    }
+  }
+
+  static async uploadBranchLogo(request, response) {
+    try {
+      const { tenant: tenantId, id: companyId, branchId } = request.params;
+      if (
+        !(await CompanyController.canEditBranch(
+          request.user.id,
+          tenantId,
+          companyId,
+          branchId,
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
+      const file = request.files && request.files.file;
+      if (
+        !file ||
+        !file.name ||
+        file.name.includes("..") ||
+        file.name.includes("/")
+      ) {
+        return response.status(400).send("Invalid or missing file.");
+      }
+      if (!file.mimetype || !file.mimetype.startsWith("image/")) {
+        return response.status(400).send("Logo must be an image.");
+      }
+      if (file.data.length > MAX_IMAGE_BYTES) {
+        return response.status(413).send("Logo file is too large (max 8 MB).");
+      }
+      const existing = await CompanyService.getCompanyBranch(
+        tenantId,
+        companyId,
+        branchId,
+      );
+      await CompanyController._deleteLogoFile(tenantId, existing.logoUrl);
+
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const fileName = `${branchId}-${safeName}`;
+      await NextcloudManager.createFile(
+        tenantId,
+        file.data,
+        fileName,
+        "public",
+        "public/branch-logos",
+      );
+      const logoUrl = `${process.env.BACKEND_URL}/api/${tenantId}/files/get?name=/public/branch-logos/${encodeURIComponent(fileName)}`;
+      const branch = await CompanyService.setBranchLogo(
+        tenantId,
+        companyId,
+        branchId,
+        logoUrl,
+      );
+      return response.status(200).send(branch);
+    } catch (error) {
+      logger.error("Could not upload branch logo", error);
+      return response
+        .status(error.status || 500)
+        .send(error.message || "Could not upload branch logo");
+    }
+  }
+
+  static async removeBranchLogo(request, response) {
+    try {
+      const { tenant: tenantId, id: companyId, branchId } = request.params;
+      if (
+        !(await CompanyController.canEditBranch(
+          request.user.id,
+          tenantId,
+          companyId,
+          branchId,
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
+      const existing = await CompanyService.getCompanyBranch(
+        tenantId,
+        companyId,
+        branchId,
+      );
+      await CompanyController._deleteLogoFile(tenantId, existing.logoUrl);
+      const branch = await CompanyService.removeBranchLogo(
+        tenantId,
+        companyId,
+        branchId,
+      );
+      return response.status(200).send(branch);
+    } catch (error) {
+      logger.error("Could not remove branch logo", error);
+      return response
+        .status(error.status || 500)
+        .send(error.message || "Could not remove branch logo");
+    }
+  }
+
   static async isTenantAdmin(userId, tenantId) {
     return PermissionService._allowUpdateAny(
       userId,
@@ -505,6 +725,33 @@ class CompanyController {
     }
     const member = await CompanyMemberManager.getMemberByUser(tenantId, userId);
     return member !== null && member.companyId === companyId;
+  }
+
+  static async getBranchAccess(userId, tenantId, companyId) {
+    if (await CompanyController.isTenantAdmin(userId, tenantId)) {
+      return { isAdmin: true, member: null };
+    }
+    const member = await CompanyMemberManager.getMemberByUser(tenantId, userId);
+    const isMember = member !== null && member.companyId === companyId;
+    return { isAdmin: false, member: isMember ? member : null };
+  }
+
+  static async canEditBranch(userId, tenantId, companyId, branchId) {
+    const access = await CompanyController.getBranchAccess(
+      userId,
+      tenantId,
+      companyId,
+    );
+    if (access.isAdmin) {
+      return true;
+    }
+    const member = access.member;
+    return (
+      member !== null &&
+      (member.isOwner === true ||
+        member.branchId === "" ||
+        member.branchId === branchId)
+    );
   }
 
   static async _deleteLogoFile(tenantId, logoUrl) {

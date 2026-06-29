@@ -7,6 +7,7 @@ const TenantManager = require("../../data-managers/tenant-manager");
 const CompanyManager = require("../../data-managers/company-manager");
 const CompanyMemberManager = require("../../data-managers/company-member-manager");
 const CompanyMediaManager = require("../../data-managers/company-media-manager");
+const CompanyBranchManager = require("../../data-managers/company-branch-manager");
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
 const { CompanyRoleService } = require("./company-role-service");
 const { isEmail } = require("validator");
@@ -19,6 +20,114 @@ async function assertTaxonomyRef(tenantId, id, type, label) {
   if (!term || term.type !== type || !term.active) {
     throw { message: `Invalid ${label}`, status: 400 };
   }
+}
+
+async function findBranchOrThrow(tenantId, companyId, branchId) {
+  const branch = await CompanyBranchManager.getBranch(tenantId, branchId);
+  if (!branch || branch.companyId !== companyId) {
+    throw { message: "Branch not found", status: 404 };
+  }
+  return branch;
+}
+
+function buildLocation(lat, lng) {
+  const toCoord = (value) => {
+    if (typeof value !== "number" && typeof value !== "string") {
+      return NaN;
+    }
+    if (typeof value === "string" && value.trim() === "") {
+      return NaN;
+    }
+    return Number(value);
+  };
+  const latNum = toCoord(lat);
+  const lngNum = toCoord(lng);
+  if (
+    !Number.isFinite(latNum) ||
+    !Number.isFinite(lngNum) ||
+    latNum < -90 ||
+    latNum > 90 ||
+    lngNum < -180 ||
+    lngNum > 180
+  ) {
+    throw { message: "Invalid coordinates", status: 400 };
+  }
+  return { type: "Point", coordinates: [lngNum, latNum] };
+}
+
+function normalizeBranch(payload, existing) {
+  const base = existing || {};
+
+  const name = String(
+    payload.name !== undefined ? payload.name : base.name || "",
+  ).trim();
+  if (!name || name.length > 200) {
+    throw { message: "Branch name is required (max 200)", status: 400 };
+  }
+
+  const city = String(
+    payload.city !== undefined ? payload.city : base.city || "",
+  ).trim();
+  if (!city) {
+    throw { message: "City is required", status: 400 };
+  }
+
+  const postalCode = String(
+    payload.postalCode !== undefined
+      ? payload.postalCode
+      : base.postalCode || "",
+  ).trim();
+  if (postalCode && !/^\d{5}$/.test(postalCode)) {
+    throw { message: "Postal code must be 5 digits", status: 400 };
+  }
+
+  const hasLat =
+    payload.lat !== undefined && payload.lat !== null && payload.lat !== "";
+  const hasLng =
+    payload.lng !== undefined && payload.lng !== null && payload.lng !== "";
+  let location;
+  if (hasLat || hasLng) {
+    if (!(hasLat && hasLng)) {
+      throw { message: "Both lat and lng are required", status: 400 };
+    }
+    location = buildLocation(payload.lat, payload.lng);
+  } else {
+    location = base.location !== undefined ? base.location : null;
+  }
+
+  return {
+    name,
+    street: String(
+      payload.street !== undefined ? payload.street : base.street || "",
+    ).trim(),
+    postalCode,
+    city,
+    districtId:
+      payload.districtId !== undefined
+        ? payload.districtId
+        : base.districtId || "",
+    location,
+  };
+}
+
+function toBranchDto(branch) {
+  const coords =
+    branch.location && Array.isArray(branch.location.coordinates)
+      ? branch.location.coordinates
+      : null;
+  return {
+    id: branch.id,
+    companyId: branch.companyId,
+    name: branch.name,
+    street: branch.street,
+    postalCode: branch.postalCode,
+    city: branch.city,
+    districtId: branch.districtId,
+    lat: coords ? coords[1] : null,
+    lng: coords ? coords[0] : null,
+    logoUrl: branch.logoUrl,
+    created: branch.created,
+  };
 }
 
 class CompanyService {
@@ -301,6 +410,84 @@ class CompanyService {
     }
     await CompanyMediaManager.removeMedia(tenantId, mediaId);
     return media;
+  }
+
+  static async getCompanyBranches(tenantId, companyId) {
+    const branches = await CompanyBranchManager.getBranchesByCompany(
+      tenantId,
+      companyId,
+    );
+    return branches.map(toBranchDto);
+  }
+
+  static async getCompanyBranch(tenantId, companyId, branchId) {
+    return toBranchDto(await findBranchOrThrow(tenantId, companyId, branchId));
+  }
+
+  static async createCompanyBranch(tenantId, companyId, payload) {
+    const company = await CompanyManager.getCompany(tenantId, companyId);
+    if (!company) {
+      throw { message: "Company not found", status: 404 };
+    }
+    const fields = normalizeBranch(payload);
+    await assertTaxonomyRef(tenantId, fields.districtId, "district", "Kreis");
+    const branch = await CompanyBranchManager.storeBranch({
+      id: uuidv4(),
+      tenantId,
+      companyId,
+      ...fields,
+    });
+    return toBranchDto(branch);
+  }
+
+  static async updateCompanyBranch(tenantId, companyId, branchId, payload) {
+    const branch = await findBranchOrThrow(tenantId, companyId, branchId);
+    const fields = normalizeBranch(payload, branch);
+    await assertTaxonomyRef(tenantId, payload.districtId, "district", "Kreis");
+    const updated = await CompanyBranchManager.storeBranch({
+      ...branch,
+      ...fields,
+      id: branch.id,
+      tenantId: branch.tenantId,
+      companyId: branch.companyId,
+      logoUrl: branch.logoUrl,
+      created: branch.created,
+    });
+    return toBranchDto(updated);
+  }
+
+  static async removeCompanyBranch(tenantId, companyId, branchId) {
+    const branch = await findBranchOrThrow(tenantId, companyId, branchId);
+    const members = await CompanyMemberManager.getMembersByCompany(
+      tenantId,
+      companyId,
+    );
+    if (members.some((member) => member.branchId === branchId)) {
+      throw {
+        message:
+          "Branch still has members assigned; reassign or remove them first",
+        status: 409,
+      };
+    }
+    const count = await CompanyBranchManager.countByCompany(
+      tenantId,
+      companyId,
+    );
+    if (count <= 1) {
+      throw { message: "A company must keep at least one branch", status: 409 };
+    }
+    await CompanyBranchManager.removeBranch(tenantId, branchId);
+    return branch;
+  }
+
+  static async setBranchLogo(tenantId, companyId, branchId, logoUrl) {
+    const branch = await findBranchOrThrow(tenantId, companyId, branchId);
+    await CompanyBranchManager.storeBranch({ ...branch, logoUrl });
+    return toBranchDto({ ...branch, logoUrl });
+  }
+
+  static async removeBranchLogo(tenantId, companyId, branchId) {
+    return CompanyService.setBranchLogo(tenantId, companyId, branchId, "");
   }
 }
 

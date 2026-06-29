@@ -61,6 +61,13 @@ describe("CompanyController — authz & handlers", () => {
       removeCompanyMedia: sandbox
         .stub()
         .resolves({ id: "m1", fileName: "public/media/x" }),
+      getCompanyBranches: sandbox.stub().resolves([]),
+      getCompanyBranch: sandbox.stub().resolves({ id: "b1", logoUrl: "" }),
+      createCompanyBranch: sandbox.stub().resolves({ id: "b1" }),
+      updateCompanyBranch: sandbox.stub().resolves({ id: "b1" }),
+      removeCompanyBranch: sandbox.stub().resolves({ id: "b1", logoUrl: "" }),
+      setBranchLogo: sandbox.stub().resolves({ id: "b1" }),
+      removeBranchLogo: sandbox.stub().resolves({ id: "b1", logoUrl: "" }),
     };
     CompanyManager = {
       getCompany: sandbox
@@ -338,6 +345,407 @@ describe("CompanyController — authz & handlers", () => {
         companyId: null,
         isOwner: false,
         branchId: "",
+      });
+    });
+  });
+
+  describe("branches — CRUD authz", () => {
+    const asBranchMember = (cid, branchId) =>
+      CompanyMemberManager.getMemberByUser.resolves({
+        companyId: cid,
+        isOwner: false,
+        branchId,
+      });
+
+    describe("list / get (read = any member or admin)", () => {
+      it("a member can list (200)", async () => {
+        asMemberOf("c1");
+        const r = res();
+        await CompanyController.listBranches(req(), r);
+        expect(r.statusCode).to.equal(200);
+      });
+
+      it("an admin can list (200)", async () => {
+        asAdmin();
+        const r = res();
+        await CompanyController.listBranches(req(), r);
+        expect(r.statusCode).to.equal(200);
+      });
+
+      it("a stranger cannot list (403)", async () => {
+        const r = res();
+        await CompanyController.listBranches(req(), r);
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.getCompanyBranches.called).to.equal(false);
+      });
+
+      it("a member of another company cannot list (403)", async () => {
+        asMemberOf("other-company");
+        const r = res();
+        await CompanyController.listBranches(req(), r);
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.getCompanyBranches.called).to.equal(false);
+      });
+
+      it("a member can get one (200)", async () => {
+        asMemberOf("c1");
+        const r = res();
+        await CompanyController.getBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(200);
+      });
+
+      it("a member of another company cannot get one (403)", async () => {
+        asMemberOf("other-company");
+        const r = res();
+        await CompanyController.getBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.getCompanyBranch.called).to.equal(false);
+      });
+
+      it("surfaces a service 404 for an unknown branch", async () => {
+        asMemberOf("c1");
+        CompanyService.getCompanyBranch.rejects({
+          status: 404,
+          message: "Branch not found",
+        });
+        const r = res();
+        await CompanyController.getBranch(
+          req({ params: { branchId: "x" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(404);
+      });
+    });
+
+    describe("create (owner or admin only)", () => {
+      it("owner creates (201) and the body is forwarded + result returned", async () => {
+        asOwnerOf("c1");
+        const r = res();
+        await CompanyController.createBranch(req({ body: { name: "X" } }), r);
+        expect(r.statusCode).to.equal(201);
+        expect(
+          CompanyService.createCompanyBranch.calledWith("kielregion", "c1", {
+            name: "X",
+          }),
+        ).to.equal(true);
+        expect(r.body).to.deep.equal({ id: "b1" });
+      });
+
+      it("admin creates (201)", async () => {
+        asAdmin();
+        const r = res();
+        await CompanyController.createBranch(req({ body: { name: "X" } }), r);
+        expect(r.statusCode).to.equal(201);
+      });
+
+      it("a non-owner member cannot create (403)", async () => {
+        asMemberOf("c1");
+        const r = res();
+        await CompanyController.createBranch(req({ body: { name: "X" } }), r);
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.createCompanyBranch.called).to.equal(false);
+      });
+
+      it("a branch-scoped member cannot create (403)", async () => {
+        asBranchMember("c1", "b1");
+        const r = res();
+        await CompanyController.createBranch(req({ body: { name: "X" } }), r);
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.createCompanyBranch.called).to.equal(false);
+      });
+
+      it("a member of another company cannot create (403)", async () => {
+        asOwnerOf("other-company");
+        const r = res();
+        await CompanyController.createBranch(req({ body: { name: "X" } }), r);
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.createCompanyBranch.called).to.equal(false);
+      });
+    });
+
+    describe("update (owner / admin / all-scope member / matching branch-scoped member)", () => {
+      it("owner edits any branch (200)", async () => {
+        asOwnerOf("c1");
+        const r = res();
+        await CompanyController.updateBranch(
+          req({ params: { branchId: "b1" }, body: { name: "X" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(200);
+      });
+
+      it("admin edits any branch (200)", async () => {
+        asAdmin();
+        const r = res();
+        await CompanyController.updateBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(200);
+      });
+
+      it("an all-scope member (branchId '') edits any branch (200)", async () => {
+        asBranchMember("c1", "");
+        const r = res();
+        await CompanyController.updateBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(200);
+      });
+
+      it("a branch-scoped member edits OWN branch (200)", async () => {
+        asBranchMember("c1", "b1");
+        const r = res();
+        await CompanyController.updateBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(200);
+      });
+
+      it("a branch-scoped member cannot edit ANOTHER branch (403)", async () => {
+        asBranchMember("c1", "b2");
+        const r = res();
+        await CompanyController.updateBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.updateCompanyBranch.called).to.equal(false);
+      });
+
+      it("the OWNER of another company cannot edit this company's branch (403)", async () => {
+        asOwnerOf("other-company");
+        const r = res();
+        await CompanyController.updateBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.updateCompanyBranch.called).to.equal(false);
+      });
+
+      it("a member of another company cannot edit this company's branch (403)", async () => {
+        asMemberOf("other-company");
+        const r = res();
+        await CompanyController.updateBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.updateCompanyBranch.called).to.equal(false);
+      });
+    });
+
+    describe("delete (owner or admin only)", () => {
+      it("owner deletes (200) and returns { id }", async () => {
+        asOwnerOf("c1");
+        const r = res();
+        await CompanyController.removeBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(200);
+        expect(
+          CompanyService.removeCompanyBranch.calledWith(
+            "kielregion",
+            "c1",
+            "b1",
+          ),
+        ).to.equal(true);
+        expect(r.body).to.deep.equal({ id: "b1" });
+      });
+
+      it("a non-owner member cannot delete (403)", async () => {
+        asMemberOf("c1");
+        const r = res();
+        await CompanyController.removeBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.removeCompanyBranch.called).to.equal(false);
+      });
+
+      it("a member of another company cannot delete (403)", async () => {
+        asOwnerOf("other-company");
+        const r = res();
+        await CompanyController.removeBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.removeCompanyBranch.called).to.equal(false);
+      });
+
+      it("surfaces the last-branch 409 from the service", async () => {
+        asOwnerOf("c1");
+        CompanyService.removeCompanyBranch.rejects({
+          status: 409,
+          message: "x",
+        });
+        const r = res();
+        await CompanyController.removeBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(409);
+      });
+    });
+
+    describe("branch logo (canEditBranch)", () => {
+      const imgFile = (over = {}) => ({
+        file: {
+          name: "logo.png",
+          mimetype: "image/png",
+          data: Buffer.from("x"),
+          ...over,
+        },
+      });
+
+      it("a branch-scoped member uploads OWN branch logo (200), deleting the old file first", async () => {
+        asBranchMember("c1", "b1");
+        CompanyService.getCompanyBranch.resolves({
+          id: "b1",
+          logoUrl:
+            "http://x/api/kielregion/files/get?name=/public/branch-logos/b1-old.png",
+        });
+        const r = res();
+        await CompanyController.uploadBranchLogo(
+          req({ params: { branchId: "b1" }, files: imgFile() }),
+          r,
+        );
+        expect(r.statusCode).to.equal(200);
+        expect(NextcloudManager.createFile.firstCall.args[2]).to.equal(
+          "b1-logo.png",
+        );
+        expect(NextcloudManager.createFile.firstCall.args[4]).to.equal(
+          "public/branch-logos",
+        );
+        expect(
+          NextcloudManager.deleteFile.calledWith(
+            "kielregion",
+            "/public/branch-logos/b1-old.png",
+          ),
+        ).to.equal(true);
+        expect(
+          NextcloudManager.deleteFile.calledBefore(NextcloudManager.createFile),
+        ).to.equal(true);
+        expect(CompanyService.setBranchLogo.calledOnce).to.equal(true);
+      });
+
+      it("an oversized branch logo → 413", async () => {
+        asOwnerOf("c1");
+        const r = res();
+        await CompanyController.uploadBranchLogo(
+          req({
+            params: { branchId: "b1" },
+            files: imgFile({ data: { length: 9 * 1024 * 1024 } }),
+          }),
+          r,
+        );
+        expect(r.statusCode).to.equal(413);
+        expect(NextcloudManager.createFile.called).to.equal(false);
+      });
+
+      it("a path-traversal branch logo filename → 400", async () => {
+        asOwnerOf("c1");
+        const r = res();
+        await CompanyController.uploadBranchLogo(
+          req({
+            params: { branchId: "b1" },
+            files: imgFile({ name: "../evil.png" }),
+          }),
+          r,
+        );
+        expect(r.statusCode).to.equal(400);
+        expect(NextcloudManager.createFile.called).to.equal(false);
+      });
+
+      it("a missing branch logo file → 400", async () => {
+        asOwnerOf("c1");
+        const r = res();
+        await CompanyController.uploadBranchLogo(
+          req({ params: { branchId: "b1" }, files: {} }),
+          r,
+        );
+        expect(r.statusCode).to.equal(400);
+        expect(NextcloudManager.createFile.called).to.equal(false);
+      });
+
+      it("a branch-scoped member cannot upload ANOTHER branch logo (403)", async () => {
+        asBranchMember("c1", "b2");
+        const r = res();
+        await CompanyController.uploadBranchLogo(
+          req({ params: { branchId: "b1" }, files: imgFile() }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+        expect(NextcloudManager.createFile.called).to.equal(false);
+      });
+
+      it("a non-image branch logo is rejected (400)", async () => {
+        asOwnerOf("c1");
+        const r = res();
+        await CompanyController.uploadBranchLogo(
+          req({
+            params: { branchId: "b1" },
+            files: imgFile({ mimetype: "application/pdf" }),
+          }),
+          r,
+        );
+        expect(r.statusCode).to.equal(400);
+      });
+
+      it("the OWNER of another company cannot upload a branch logo here (403)", async () => {
+        asOwnerOf("other-company");
+        const r = res();
+        await CompanyController.uploadBranchLogo(
+          req({ params: { branchId: "b1" }, files: imgFile() }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+        expect(NextcloudManager.createFile.called).to.equal(false);
+      });
+
+      it("a branch-scoped member removes OWN branch logo (200)", async () => {
+        asBranchMember("c1", "b1");
+        const r = res();
+        await CompanyController.removeBranchLogo(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(200);
+        expect(CompanyService.removeBranchLogo.calledOnce).to.equal(true);
+      });
+
+      it("a branch-scoped member cannot remove ANOTHER branch logo (403)", async () => {
+        asBranchMember("c1", "b2");
+        const r = res();
+        await CompanyController.removeBranchLogo(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.removeBranchLogo.called).to.equal(false);
+      });
+
+      it("a member of another company cannot remove a branch logo here (403)", async () => {
+        asOwnerOf("other-company");
+        const r = res();
+        await CompanyController.removeBranchLogo(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.removeBranchLogo.called).to.equal(false);
       });
     });
   });

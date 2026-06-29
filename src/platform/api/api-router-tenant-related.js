@@ -80,6 +80,41 @@ router.delete(
   AuthenticationController.isSignedIn,
   CompanyController.removeMedia,
 );
+router.get(
+  "/companies/:id/branches",
+  AuthenticationController.isSignedIn,
+  CompanyController.listBranches,
+);
+router.post(
+  "/companies/:id/branches",
+  AuthenticationController.isSignedIn,
+  CompanyController.createBranch,
+);
+router.get(
+  "/companies/:id/branches/:branchId",
+  AuthenticationController.isSignedIn,
+  CompanyController.getBranch,
+);
+router.put(
+  "/companies/:id/branches/:branchId",
+  AuthenticationController.isSignedIn,
+  CompanyController.updateBranch,
+);
+router.delete(
+  "/companies/:id/branches/:branchId",
+  AuthenticationController.isSignedIn,
+  CompanyController.removeBranch,
+);
+router.post(
+  "/companies/:id/branches/:branchId/logo",
+  AuthenticationController.isSignedIn,
+  CompanyController.uploadBranchLogo,
+);
+router.delete(
+  "/companies/:id/branches/:branchId/logo",
+  AuthenticationController.isSignedIn,
+  CompanyController.removeBranchLogo,
+);
 router.post(
   "/companies/:id/verify",
   AuthenticationController.isSignedIn,
