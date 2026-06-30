@@ -19,6 +19,7 @@ const CatalogController = require("./controllers/catalog-controller");
 const CompanyController = require("./controllers/company-controller");
 const SettingsController = require("./controllers/settings-controller");
 const OfferController = require("./controllers/offer-controller");
+const TaxonomyController = require("./controllers/taxonomy-controller");
 const { optionalAuth } = require("../../middleware/auth-middleware");
 
 const router = express.Router({ mergeParams: true });
@@ -146,6 +147,11 @@ router.post(
   AuthenticationController.isSignedIn,
   CompanyController.block,
 );
+
+// TAXONOMIES
+// ==========
+
+router.get("/taxonomies", TaxonomyController.getTaxonomies);
 
 // SETTINGS
 // ========
