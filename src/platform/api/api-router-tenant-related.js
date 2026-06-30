@@ -18,6 +18,7 @@ const {
 const CatalogController = require("./controllers/catalog-controller");
 const CompanyController = require("./controllers/company-controller");
 const SettingsController = require("./controllers/settings-controller");
+const OfferController = require("./controllers/offer-controller");
 const { optionalAuth } = require("../../middleware/auth-middleware");
 
 const router = express.Router({ mergeParams: true });
@@ -154,6 +155,77 @@ router.put(
   "/settings",
   AuthenticationController.isSignedIn,
   SettingsController.updateSettings,
+);
+
+// OFFERS / PRAKTIKA
+// =================
+
+// public
+router.get("/offers", OfferController.searchOffers);
+router.get("/offers/:offerId/public", OfferController.getPublicOffer);
+
+// moderation (admin)
+router.get(
+  "/admin/offers",
+  AuthenticationController.isSignedIn,
+  OfferController.listModeration,
+);
+router.post(
+  "/offers/:offerId/approve",
+  AuthenticationController.isSignedIn,
+  OfferController.approveOffer,
+);
+router.post(
+  "/offers/:offerId/reject",
+  AuthenticationController.isSignedIn,
+  OfferController.rejectOffer,
+);
+router.post(
+  "/offers/:offerId/deactivate",
+  AuthenticationController.isSignedIn,
+  OfferController.deactivateOffer,
+);
+
+// company-side
+router.get(
+  "/companies/:id/offers",
+  AuthenticationController.isSignedIn,
+  OfferController.listOffers,
+);
+router.post(
+  "/companies/:id/offers",
+  AuthenticationController.isSignedIn,
+  OfferController.createOffer,
+);
+router.get(
+  "/companies/:id/offers/:offerId",
+  AuthenticationController.isSignedIn,
+  OfferController.getOffer,
+);
+router.put(
+  "/companies/:id/offers/:offerId",
+  AuthenticationController.isSignedIn,
+  OfferController.updateOffer,
+);
+router.delete(
+  "/companies/:id/offers/:offerId",
+  AuthenticationController.isSignedIn,
+  OfferController.deleteOffer,
+);
+router.get(
+  "/companies/:id/offers/:offerId/media",
+  AuthenticationController.isSignedIn,
+  OfferController.listMedia,
+);
+router.post(
+  "/companies/:id/offers/:offerId/media",
+  AuthenticationController.isSignedIn,
+  OfferController.uploadMedia,
+);
+router.delete(
+  "/companies/:id/offers/:offerId/media/:mediaId",
+  AuthenticationController.isSignedIn,
+  OfferController.removeMedia,
 );
 
 // BOOKABLES
