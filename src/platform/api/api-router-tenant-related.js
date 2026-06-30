@@ -17,6 +17,7 @@ const {
 } = require("./controllers/group-booking-controller");
 const CatalogController = require("./controllers/catalog-controller");
 const CompanyController = require("./controllers/company-controller");
+const SettingsController = require("./controllers/settings-controller");
 const { optionalAuth } = require("../../middleware/auth-middleware");
 
 const router = express.Router({ mergeParams: true });
@@ -143,6 +144,16 @@ router.post(
   "/companies/:id/block",
   AuthenticationController.isSignedIn,
   CompanyController.block,
+);
+
+// SETTINGS
+// ========
+
+router.get("/settings", SettingsController.getSettings);
+router.put(
+  "/settings",
+  AuthenticationController.isSignedIn,
+  SettingsController.updateSettings,
 );
 
 // BOOKABLES
