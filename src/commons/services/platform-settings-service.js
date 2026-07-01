@@ -17,7 +17,7 @@ class PlatformSettingsService {
     if (existing) {
       return existing;
     }
-    return PlatformSettingsManager.store(PlatformSettings.create({ tenantId }));
+    return PlatformSettings.create({ tenantId });
   }
 
   static async updateSettings(tenantId, payload) {

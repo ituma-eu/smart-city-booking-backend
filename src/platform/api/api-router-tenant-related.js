@@ -194,6 +194,11 @@ router.post(
 
 // company-side
 router.get(
+  "/companies/:id/stats",
+  AuthenticationController.isSignedIn,
+  OfferController.getStats,
+);
+router.get(
   "/companies/:id/offers",
   AuthenticationController.isSignedIn,
   OfferController.listOffers,

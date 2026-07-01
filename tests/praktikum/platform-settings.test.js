@@ -28,9 +28,9 @@ describe("PlatformSettingsService", () => {
   });
 
   describe("getSettings", () => {
-    it("creates and returns defaults when none exist", async () => {
+    it("returns defaults without persisting when none exist", async () => {
       const s = await PlatformSettingsService.getSettings("kielregion");
-      expect(PlatformSettingsManager.store.calledOnce).to.equal(true);
+      expect(PlatformSettingsManager.store.called).to.equal(false);
       expect(s.tenantId).to.equal("kielregion");
       expect(s.directPublishVerified).to.equal(false);
       expect(s.maxDocsPerInternship).to.equal(5);

@@ -49,7 +49,14 @@ describe("OfferService", () => {
       removeMedia: sandbox.stub().resolves(),
     };
     CompanyManager = {
-      getCompany: sandbox.stub().resolves({ id: "c1", status: "verified" }),
+      getCompany: sandbox.stub().resolves({
+        id: "c1",
+        status: "verified",
+        city: "Kiel",
+        postalCode: "24103",
+        districtId: "district-kiel",
+        location: { type: "Point", coordinates: [9.99, 54.07] },
+      }),
     };
     CompanyBranchManager = { getBranch: sandbox.stub().resolves(branch()) };
     TaxonomyTermManager = {
@@ -110,12 +117,22 @@ describe("OfferService", () => {
         () => OfferService.createOffer("kg", "c1", basePayload({ title: "" })),
         400,
       ));
-    it("rejects a missing branch (400)", () =>
-      expectStatus(
-        () =>
-          OfferService.createOffer("kg", "c1", basePayload({ branchId: "" })),
-        400,
-      ));
+    it("allows a missing branch and inherits the company address", async () => {
+      const offer = await OfferService.createOffer(
+        "kg",
+        "c1",
+        basePayload({ branchId: "" }),
+      );
+      const stored = OfferManager.storeOffer.firstCall.args[0];
+      expect(stored.branchId).to.equal("");
+      expect(stored.city).to.equal("Kiel");
+      expect(stored.districtId).to.equal("district-kiel");
+      expect(stored.location).to.deep.equal({
+        type: "Point",
+        coordinates: [9.99, 54.07],
+      });
+      expect(offer).to.exist;
+    });
     it("rejects a branch of another company (400)", async () => {
       CompanyBranchManager.getBranch.resolves({
         ...branch(),
@@ -422,6 +439,128 @@ describe("OfferService", () => {
       const dto = await OfferService.approveOffer("kg", "o1");
       expect(dto.status).to.equal("Online");
       expect(dto.publishedAt).to.equal(4242);
+    });
+  });
+
+  describe("getCompanyStats", () => {
+    const offer = (over = {}) => ({
+      id: "o",
+      companyId: "c1",
+      branchId: "",
+      industryId: "",
+      internshipTypeId: "",
+      districtId: "",
+      status: "Entwurf",
+      views: 0,
+      ...over,
+    });
+
+    it("empty company → zeros and empty arrays", async () => {
+      OfferManager.getOffersByCompany.resolves([]);
+      const s = await OfferService.getCompanyStats("kg", "c1");
+      expect(s.total).to.equal(0);
+      expect(s.byStatus).to.deep.equal({
+        Entwurf: 0,
+        "In Prüfung": 0,
+        Online: 0,
+        Archiv: 0,
+      });
+      expect(s.totalViews).to.equal(0);
+      expect(s.byBranch).to.deep.equal([]);
+      expect(s.byIndustry).to.deep.equal([]);
+    });
+
+    it("counts total, by status and total views", async () => {
+      OfferManager.getOffersByCompany.resolves([
+        offer({ status: "Online", views: 10 }),
+        offer({ status: "Online", views: 5 }),
+        offer({ status: "Entwurf", views: 1 }),
+        offer({ status: "In Prüfung" }),
+        offer({ status: "Archiv", views: 2 }),
+      ]);
+      const s = await OfferService.getCompanyStats("kg", "c1");
+      expect(s.total).to.equal(5);
+      expect(s.byStatus).to.deep.equal({
+        Entwurf: 1,
+        "In Prüfung": 1,
+        Online: 2,
+        Archiv: 1,
+      });
+      expect(s.totalViews).to.equal(18);
+    });
+
+    it("aggregates per branch with online counts (incl. company-level '')", async () => {
+      OfferManager.getOffersByCompany.resolves([
+        offer({ branchId: "b1", status: "Online" }),
+        offer({ branchId: "b1", status: "Entwurf" }),
+        offer({ branchId: "", status: "Online" }),
+      ]);
+      const s = await OfferService.getCompanyStats("kg", "c1");
+      const b1 = s.byBranch.find((b) => b.branchId === "b1");
+      const hq = s.byBranch.find((b) => b.branchId === "");
+      expect(b1).to.deep.equal({ branchId: "b1", total: 2, online: 1 });
+      expect(hq).to.deep.equal({ branchId: "", total: 1, online: 1 });
+    });
+
+    it("aggregates by industry, internship type and district", async () => {
+      OfferManager.getOffersByCompany.resolves([
+        offer({
+          industryId: "industry-it",
+          internshipTypeId: "internship_type-schulpraktikum",
+          districtId: "district-kiel",
+        }),
+        offer({ industryId: "industry-it", districtId: "district-kiel" }),
+        offer({ industryId: "industry-handwerk" }),
+      ]);
+      const s = await OfferService.getCompanyStats("kg", "c1");
+      expect(s.byIndustry).to.have.deep.members([
+        { id: "industry-it", count: 2 },
+        { id: "industry-handwerk", count: 1 },
+      ]);
+      expect(s.byInternshipType).to.deep.equal([
+        { id: "internship_type-schulpraktikum", count: 1 },
+      ]);
+      expect(s.byDistrict).to.deep.equal([{ id: "district-kiel", count: 2 }]);
+    });
+
+    it("applies branchId and industryId filters", async () => {
+      OfferManager.getOffersByCompany.resolves([
+        offer({ branchId: "b1", industryId: "industry-it", status: "Online" }),
+        offer({ branchId: "b2", industryId: "industry-it", status: "Online" }),
+        offer({
+          branchId: "b1",
+          industryId: "industry-handwerk",
+          status: "Online",
+        }),
+      ]);
+      const s = await OfferService.getCompanyStats("kg", "c1", {
+        branchId: "b1",
+        industryId: "industry-it",
+      });
+      expect(s.total).to.equal(1);
+      expect(s.byStatus.Online).to.equal(1);
+    });
+
+    it("branchId '' filters to company-level offers only", async () => {
+      OfferManager.getOffersByCompany.resolves([
+        offer({ branchId: "" }),
+        offer({ branchId: "" }),
+        offer({ branchId: "b1" }),
+      ]);
+      const s = await OfferService.getCompanyStats("kg", "c1", {
+        branchId: "",
+      });
+      expect(s.total).to.equal(2);
+    });
+
+    it("omitted branchId counts offers across all branches", async () => {
+      OfferManager.getOffersByCompany.resolves([
+        offer({ branchId: "" }),
+        offer({ branchId: "b1" }),
+        offer({ branchId: "b2" }),
+      ]);
+      const s = await OfferService.getCompanyStats("kg", "c1");
+      expect(s.total).to.equal(3);
     });
   });
 });

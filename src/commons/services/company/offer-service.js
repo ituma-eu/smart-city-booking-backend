@@ -102,12 +102,12 @@ async function validateOfferPayload(tenantId, companyId, payload) {
   }
 
   const branchId = String(payload.branchId || "").trim();
-  if (!branchId) {
-    throw { message: "Branch is required", status: 400 };
-  }
-  const branch = await CompanyBranchManager.getBranch(tenantId, branchId);
-  if (!branch || branch.companyId !== companyId) {
-    throw { message: "Invalid branch", status: 400 };
+  let branch = null;
+  if (branchId) {
+    branch = await CompanyBranchManager.getBranch(tenantId, branchId);
+    if (!branch || branch.companyId !== companyId) {
+      throw { message: "Invalid branch", status: 400 };
+    }
   }
 
   const industryId = String(payload.industryId || "").trim();
@@ -217,21 +217,22 @@ class OfferService {
       requestedStatus(payload),
     );
 
+    const loc = fields.branch ?? company;
     const offer = await OfferManager.storeOffer({
       id: uuidv4(),
       tenantId,
       companyId,
-      branchId: fields.branch.id,
+      branchId: fields.branch ? fields.branch.id : "",
       title: fields.title,
       industryId: fields.industryId,
       internshipTypeId: fields.internshipTypeId,
       minAge: fields.minAge,
       duration: fields.duration,
       applicationDeadline: fields.applicationDeadline,
-      city: fields.branch.city,
-      postalCode: fields.branch.postalCode,
-      districtId: fields.branch.districtId,
-      location: fields.branch.location || null,
+      city: loc.city,
+      postalCode: loc.postalCode,
+      districtId: loc.districtId,
+      location: loc.location || null,
       requirements: fields.requirements,
       additionalInfo: fields.additionalInfo,
       aboutUs: fields.aboutUs,
@@ -281,19 +282,20 @@ class OfferService {
       reviewNote = status === "Entwurf" ? existing.reviewNote : "";
     }
 
+    const loc = fields.branch ?? company;
     const offer = await OfferManager.storeOffer({
       ...existing,
-      branchId: fields.branch.id,
+      branchId: fields.branch ? fields.branch.id : "",
       title: fields.title,
       industryId: fields.industryId,
       internshipTypeId: fields.internshipTypeId,
       minAge: fields.minAge,
       duration: fields.duration,
       applicationDeadline: fields.applicationDeadline,
-      city: fields.branch.city,
-      postalCode: fields.branch.postalCode,
-      districtId: fields.branch.districtId,
-      location: fields.branch.location || null,
+      city: loc.city,
+      postalCode: loc.postalCode,
+      districtId: loc.districtId,
+      location: loc.location || null,
       requirements: fields.requirements,
       additionalInfo: fields.additionalInfo,
       aboutUs: fields.aboutUs,
@@ -323,6 +325,66 @@ class OfferService {
       throw { message: "Offer not found", status: 404 };
     }
     return toOfferDto(offer);
+  }
+
+  static async getCompanyStats(tenantId, companyId, filters = {}) {
+    const all = await OfferManager.getOffersByCompany(tenantId, companyId);
+    // undefined = no filter; "" filters to company-level offers (branchId === "")
+    const offers = all.filter(
+      (o) =>
+        (filters.branchId === undefined || o.branchId === filters.branchId) &&
+        (filters.industryId === undefined ||
+          o.industryId === filters.industryId),
+    );
+
+    const byStatus = { Entwurf: 0, "In Prüfung": 0, Online: 0, Archiv: 0 };
+    const branches = new Map();
+    const industries = new Map();
+    const internshipTypes = new Map();
+    const districts = new Map();
+    let totalViews = 0;
+
+    for (const o of offers) {
+      if (byStatus[o.status] !== undefined) {
+        byStatus[o.status] += 1;
+      }
+      totalViews += o.views || 0;
+      const branch = branches.get(o.branchId) || { total: 0, online: 0 };
+      branch.total += 1;
+      if (o.status === "Online") {
+        branch.online += 1;
+      }
+      branches.set(o.branchId, branch);
+      if (o.industryId) {
+        industries.set(o.industryId, (industries.get(o.industryId) || 0) + 1);
+      }
+      if (o.internshipTypeId) {
+        internshipTypes.set(
+          o.internshipTypeId,
+          (internshipTypes.get(o.internshipTypeId) || 0) + 1,
+        );
+      }
+      if (o.districtId) {
+        districts.set(o.districtId, (districts.get(o.districtId) || 0) + 1);
+      }
+    }
+
+    const toCounts = (map) =>
+      Array.from(map.entries()).map(([id, count]) => ({ id, count }));
+
+    return {
+      total: offers.length,
+      byStatus,
+      totalViews,
+      byBranch: Array.from(branches.entries()).map(([branchId, v]) => ({
+        branchId,
+        total: v.total,
+        online: v.online,
+      })),
+      byIndustry: toCounts(industries),
+      byInternshipType: toCounts(internshipTypes),
+      byDistrict: toCounts(districts),
+    };
   }
 
   static async deleteOffer(tenantId, companyId, offerId) {

@@ -19,10 +19,17 @@ describe("CompanyService", () => {
     owner: {
       id: "Owner@Example.de",
       password: "secret123",
-      firstName: "A",
-      lastName: "B",
+      firstName: "Anna",
+      lastName: "Berg",
     },
-    company: { name: "Test Firma GmbH", mail: "info@test.de", city: "Kiel" },
+    company: {
+      name: "Test Firma GmbH",
+      mail: "info@test.de",
+      street: "Hauptstr. 1",
+      postalCode: "24103",
+      city: "Kiel",
+      phone: "0431 123456",
+    },
     consents: {
       privacyConsent: true,
       authorizedToRepresent: true,
@@ -170,6 +177,63 @@ describe("CompanyService", () => {
       }
       expect(error.status).to.equal(400);
     });
+
+    const expectReject = async (mutate) => {
+      const payload = validPayload();
+      mutate(payload);
+      let error;
+      try {
+        await CompanyService.registerCompany("kielregion", payload);
+      } catch (e) {
+        error = e;
+      }
+      expect(error && error.status).to.equal(400);
+      expect(UserService.singUpUser.called).to.equal(false);
+    };
+
+    it("rejects an invalid email (400)", () =>
+      expectReject((p) => (p.owner.id = "1")));
+    it("rejects a purely-numeric password (400)", () =>
+      expectReject((p) => (p.owner.password = "123456789")));
+    it("rejects a letters-only password (400)", () =>
+      expectReject((p) => (p.owner.password = "abcdefgh")));
+    it("rejects a non-5-digit PLZ (400)", () =>
+      expectReject((p) => (p.company.postalCode = "1")));
+    it("rejects a too-short phone (400)", () =>
+      expectReject((p) => (p.company.phone = "1")));
+    it("rejects a single-character company name (400)", () =>
+      expectReject((p) => (p.company.name = "1")));
+    it("rejects an invalid website (400)", () =>
+      expectReject((p) => (p.company.website = "not-a-url")));
+    it("accepts a valid https website (no throw)", async () => {
+      const payload = validPayload();
+      payload.company.website = "https://example.de";
+      await CompanyService.registerCompany("kielregion", payload);
+      expect(UserService.singUpUser.calledOnce).to.equal(true);
+    });
+    it("rejects a description over the max length (400)", () =>
+      expectReject((p) => (p.company.description = "x".repeat(2001))));
+    it("accepts a description at the max length (no throw)", async () => {
+      const payload = validPayload();
+      payload.company.description = "x".repeat(2000);
+      await CompanyService.registerCompany("kielregion", payload);
+      expect(UserService.singUpUser.calledOnce).to.equal(true);
+    });
+    it("stores the location as a GeoJSON Point when lat/lng are provided", async () => {
+      const payload = validPayload();
+      payload.company.lat = 54.32;
+      payload.company.lng = 10.14;
+      await CompanyService.registerCompany("kielregion", payload);
+      const stored = CompanyManager.storeCompany.firstCall.args[0];
+      expect(stored.location).to.deep.equal({
+        type: "Point",
+        coordinates: [10.14, 54.32],
+      });
+    });
+    it("rejects lat without lng (400)", () =>
+      expectReject((p) => {
+        p.company.lat = 54.32;
+      }));
 
     it("rejects when the tenant does not exist (404)", async () => {
       TenantManager.getTenant.resolves(null);
@@ -370,6 +434,31 @@ describe("CompanyService", () => {
         error = e;
       }
       expect(error.status).to.equal(400);
+    });
+
+    it("throttles a second resend within the cooldown (429)", async () => {
+      CompanyMemberManager.getMemberByUser.resolves({
+        userId: "test@company.com",
+      });
+      UserManager.getUserBy.resolves({
+        id: "test@company.com",
+        isVerified: false,
+        addHook: sandbox.stub().returns({ id: "hook-1" }),
+      });
+
+      await CompanyService.resendVerification("kielregion", "test@company.com");
+
+      let error;
+      try {
+        await CompanyService.resendVerification(
+          "kielregion",
+          "test@company.com",
+        );
+      } catch (e) {
+        error = e;
+      }
+      expect(error && error.status).to.equal(429);
+      expect(MailController.sendVerificationRequest.calledOnce).to.equal(true);
     });
   });
 });

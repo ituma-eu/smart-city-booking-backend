@@ -47,6 +47,7 @@ describe("CompanyService — members & invitations", () => {
       updateMembership: sandbox.stub().resolves(),
       addRoleToMembership: sandbox.stub().resolves(),
       removeMembership: sandbox.stub().resolves(),
+      getMembershipsByUserID: sandbox.stub().resolves([]),
     };
     CompanyRoleService = {
       ensureUnternehmenRole: sandbox.stub().resolves({ id: "role1" }),
@@ -355,6 +356,22 @@ describe("CompanyService — members & invitations", () => {
       expect(result.removed).to.equal("m@x.de");
     });
 
+    it("keeps the user account when memberships remain elsewhere", async () => {
+      CompanyMemberManager.getMemberByUser.resolves({
+        companyId: "c1",
+        userId: "m@x.de",
+        isOwner: false,
+      });
+      MembershipManager.getMembershipsByUserID.resolves([
+        { tenantId: "other", userId: "m@x.de" },
+      ]);
+      await CompanyService.removeCompanyMember("kielregion", "c1", "m@x.de");
+      expect(
+        MembershipManager.removeMembership.calledWith("kielregion", "m@x.de"),
+      ).to.equal(true);
+      expect(UserManager.deleteUser.called).to.equal(false);
+    });
+
     it("cancels a pending invitation", async () => {
       CompanyMemberManager.getMemberByUser.resolves(null);
       MemberInvitationManager.getPendingByEmail.resolves({ id: "i1" });
@@ -389,6 +406,81 @@ describe("CompanyService — members & invitations", () => {
         () => CompanyService.removeCompanyMember("kielregion", "c1", "x@x.de"),
         404,
       );
+    });
+
+    it("with a branch scope, removes a member in the same branch", async () => {
+      CompanyMemberManager.getMemberByUser.resolves({
+        companyId: "c1",
+        userId: "m@x.de",
+        isOwner: false,
+        branchId: "b1",
+      });
+      const result = await CompanyService.removeCompanyMember(
+        "kielregion",
+        "c1",
+        "m@x.de",
+        "b1",
+      );
+      expect(UserManager.deleteUser.calledWith("m@x.de")).to.equal(true);
+      expect(result.removed).to.equal("m@x.de");
+    });
+
+    it("with a branch scope, refuses a member in a different branch (403)", async () => {
+      CompanyMemberManager.getMemberByUser.resolves({
+        companyId: "c1",
+        userId: "m@x.de",
+        isOwner: false,
+        branchId: "b2",
+      });
+      await expectStatus(
+        () =>
+          CompanyService.removeCompanyMember(
+            "kielregion",
+            "c1",
+            "m@x.de",
+            "b1",
+          ),
+        403,
+      );
+      expect(UserManager.deleteUser.called).to.equal(false);
+      expect(CompanyMemberManager.removeMember.called).to.equal(false);
+    });
+
+    it("with a branch scope, cancels a pending invite in the same branch", async () => {
+      CompanyMemberManager.getMemberByUser.resolves(null);
+      MemberInvitationManager.getPendingByEmail.resolves({
+        id: "i1",
+        branchId: "b1",
+      });
+      const result = await CompanyService.removeCompanyMember(
+        "kielregion",
+        "c1",
+        "neu@team.de",
+        "b1",
+      );
+      expect(
+        MemberInvitationManager.remove.calledWith("kielregion", "i1"),
+      ).to.equal(true);
+      expect(result.removed).to.equal("neu@team.de");
+    });
+
+    it("with a branch scope, refuses a pending invite in a different branch (403)", async () => {
+      CompanyMemberManager.getMemberByUser.resolves(null);
+      MemberInvitationManager.getPendingByEmail.resolves({
+        id: "i1",
+        branchId: "b2",
+      });
+      await expectStatus(
+        () =>
+          CompanyService.removeCompanyMember(
+            "kielregion",
+            "c1",
+            "neu@team.de",
+            "b1",
+          ),
+        403,
+      );
+      expect(MemberInvitationManager.remove.called).to.equal(false);
     });
   });
 

@@ -9,6 +9,7 @@ describe("CompanyService — branches", () => {
   let TaxonomyTermManager;
   let CompanyMemberManager;
   let MemberInvitationManager;
+  let OfferManager;
   let CompanyService;
 
   const existingBranch = () => ({
@@ -31,7 +32,6 @@ describe("CompanyService — branches", () => {
     CompanyBranchManager = {
       getBranchesByCompany: sandbox.stub().resolves([]),
       getBranch: sandbox.stub().resolves(null),
-      countByCompany: sandbox.stub().resolves(2),
       storeBranch: sandbox.stub().callsFake(async (b) => b),
       removeBranch: sandbox.stub().resolves(),
     };
@@ -44,8 +44,10 @@ describe("CompanyService — branches", () => {
     MemberInvitationManager = {
       getPendingByCompany: sandbox.stub().resolves([]),
     };
+    OfferManager = { countByBranch: sandbox.stub().resolves(0) };
 
     mock("../../src/commons/data-managers/company-manager", CompanyManager);
+    mock("../../src/commons/data-managers/offer-manager", OfferManager);
     mock(
       "../../src/commons/data-managers/company-branch-manager",
       CompanyBranchManager,
@@ -287,20 +289,8 @@ describe("CompanyService — branches", () => {
       expect(CompanyBranchManager.removeBranch.called).to.equal(false);
     });
 
-    it("throws 409 (last branch) when it is the only branch and has no members", async () => {
+    it("removes the only branch when it has no offers, members or invitations", async () => {
       CompanyBranchManager.getBranch.resolves(existingBranch());
-      CompanyBranchManager.countByCompany.resolves(1);
-      await expectStatus(
-        () => CompanyService.removeCompanyBranch("kielregion", "c1", "b1"),
-        409,
-        "at least one branch",
-      );
-      expect(CompanyBranchManager.removeBranch.called).to.equal(false);
-    });
-
-    it("removes when more than one branch exists", async () => {
-      CompanyBranchManager.getBranch.resolves(existingBranch());
-      CompanyBranchManager.countByCompany.resolves(2);
       const branch = await CompanyService.removeCompanyBranch(
         "kielregion",
         "c1",
@@ -312,10 +302,32 @@ describe("CompanyService — branches", () => {
       expect(branch.id).to.equal("b1");
     });
 
-    it("throws 409 (members) and checks members BEFORE the last-branch guard", async () => {
-      // count = 1 so the ONLY way to reach 409 is the members guard firing first
+    it("throws 409 when the branch still has internships assigned", async () => {
       CompanyBranchManager.getBranch.resolves(existingBranch());
-      CompanyBranchManager.countByCompany.resolves(1);
+      OfferManager.countByBranch.resolves(2);
+      await expectStatus(
+        () => CompanyService.removeCompanyBranch("kielregion", "c1", "b1"),
+        409,
+        "internships assigned",
+      );
+      expect(CompanyBranchManager.removeBranch.called).to.equal(false);
+    });
+
+    it("removes when more than one branch exists", async () => {
+      CompanyBranchManager.getBranch.resolves(existingBranch());
+      const branch = await CompanyService.removeCompanyBranch(
+        "kielregion",
+        "c1",
+        "b1",
+      );
+      expect(
+        CompanyBranchManager.removeBranch.calledWith("kielregion", "b1"),
+      ).to.equal(true);
+      expect(branch.id).to.equal("b1");
+    });
+
+    it("throws 409 when a member is scoped to this branch", async () => {
+      CompanyBranchManager.getBranch.resolves(existingBranch());
       CompanyMemberManager.getMembersByCompany.resolves([
         { userId: "u@x.de", branchId: "b1" },
       ]);
@@ -329,7 +341,6 @@ describe("CompanyService — branches", () => {
 
     it("allows deletion when members exist but none are scoped to this branch", async () => {
       CompanyBranchManager.getBranch.resolves(existingBranch());
-      CompanyBranchManager.countByCompany.resolves(2);
       CompanyMemberManager.getMembersByCompany.resolves([
         { userId: "owner@x.de", branchId: "" },
         { userId: "u2@x.de", branchId: "b2" },
@@ -342,7 +353,6 @@ describe("CompanyService — branches", () => {
 
     it("throws 409 when a pending invitation is scoped to this branch", async () => {
       CompanyBranchManager.getBranch.resolves(existingBranch());
-      CompanyBranchManager.countByCompany.resolves(2);
       MemberInvitationManager.getPendingByCompany.resolves([
         { email: "invitee@x.de", branchId: "b1" },
       ]);
@@ -356,7 +366,6 @@ describe("CompanyService — branches", () => {
 
     it("allows deletion when a pending invitation targets a different branch", async () => {
       CompanyBranchManager.getBranch.resolves(existingBranch());
-      CompanyBranchManager.countByCompany.resolves(2);
       MemberInvitationManager.getPendingByCompany.resolves([
         { email: "invitee@x.de", branchId: "b2" },
       ]);

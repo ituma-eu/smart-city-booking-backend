@@ -43,6 +43,31 @@ class OfferController {
     }
   }
 
+  static async getStats(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      const companyId = request.params.id;
+      if (
+        !(await CompanyController.isMemberOrAdmin(
+          request.user.id,
+          tenantId,
+          companyId,
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
+      const str = (v) =>
+        v === undefined || v === null ? undefined : String(v);
+      const stats = await OfferService.getCompanyStats(tenantId, companyId, {
+        branchId: str(request.query.branchId),
+        industryId: str(request.query.industryId),
+      });
+      return response.status(200).send(stats);
+    } catch (error) {
+      return OfferController._fail(response, error, "Could not load stats");
+    }
+  }
+
   static async getOffer(request, response) {
     try {
       const tenantId = request.params.tenant;

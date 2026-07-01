@@ -6,6 +6,7 @@ const { Schema } = mongoose;
 const CompanySchema = new Schema(companySchemaDefinition);
 
 CompanySchema.index({ tenantId: 1, status: 1 });
+CompanySchema.index({ location: "2dsphere" });
 
 CompanySchema.methods.toEntity = function () {
   const Company = require("../../entities/company/company");

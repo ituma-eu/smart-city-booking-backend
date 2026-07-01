@@ -67,11 +67,28 @@ class CompanyController {
         ? { status: request.query.status }
         : {};
       const companies = await CompanyManager.getCompanies(tenantId, filter);
-      return response.status(200).send(companies);
+      return response
+        .status(200)
+        .send(companies.map(CompanyController._withLatLng));
     } catch (error) {
       logger.error(error);
       return response.sendStatus(500);
     }
+  }
+
+  static _withLatLng(company) {
+    if (!company) {
+      return company;
+    }
+    const coords =
+      company.location && Array.isArray(company.location.coordinates)
+        ? company.location.coordinates
+        : null;
+    const dto = { ...company };
+    delete dto.location;
+    dto.lat = coords ? coords[1] : null;
+    dto.lng = coords ? coords[0] : null;
+    return dto;
   }
 
   static async getMyCompany(request, response) {
@@ -91,7 +108,7 @@ class CompanyController {
       if (!company) {
         return response.sendStatus(404);
       }
-      return response.status(200).send(company);
+      return response.status(200).send(CompanyController._withLatLng(company));
     } catch (error) {
       logger.error(error);
       return response.sendStatus(500);
@@ -159,7 +176,7 @@ class CompanyController {
       if (!isAdmin && !isMember) {
         return response.sendStatus(403);
       }
-      return response.status(200).send(company);
+      return response.status(200).send(CompanyController._withLatLng(company));
     } catch (error) {
       logger.error(error);
       return response.sendStatus(500);
@@ -195,6 +212,14 @@ class CompanyController {
         sizeId: company.sizeId,
         logoUrl: company.logoUrl,
         description: company.description,
+        lat:
+          company.location && Array.isArray(company.location.coordinates)
+            ? company.location.coordinates[1]
+            : null,
+        lng:
+          company.location && Array.isArray(company.location.coordinates)
+            ? company.location.coordinates[0]
+            : null,
         media: media.map((item) => ({
           id: item.id,
           url: item.url,
@@ -213,7 +238,7 @@ class CompanyController {
       const tenantId = request.params.tenant;
       const companyId = request.params.id;
       if (
-        !(await CompanyController.isOwnerOrAdmin(
+        !(await CompanyController.isCompanyManager(
           request.user.id,
           tenantId,
           companyId,
@@ -226,7 +251,7 @@ class CompanyController {
         companyId,
         request.body,
       );
-      return response.status(200).send(company);
+      return response.status(200).send(CompanyController._withLatLng(company));
     } catch (error) {
       logger.error("Could not update company profile", error);
       return response
@@ -240,7 +265,7 @@ class CompanyController {
       const tenantId = request.params.tenant;
       const companyId = request.params.id;
       if (
-        !(await CompanyController.isOwnerOrAdmin(
+        !(await CompanyController.isCompanyManager(
           request.user.id,
           tenantId,
           companyId,
@@ -284,7 +309,7 @@ class CompanyController {
         companyId,
         logoUrl,
       );
-      return response.status(200).send(company);
+      return response.status(200).send(CompanyController._withLatLng(company));
     } catch (error) {
       logger.error("Could not upload logo", error);
       return response
@@ -298,7 +323,7 @@ class CompanyController {
       const tenantId = request.params.tenant;
       const companyId = request.params.id;
       if (
-        !(await CompanyController.isOwnerOrAdmin(
+        !(await CompanyController.isCompanyManager(
           request.user.id,
           tenantId,
           companyId,
@@ -315,7 +340,7 @@ class CompanyController {
         tenantId,
         companyId,
       );
-      return response.status(200).send(company);
+      return response.status(200).send(CompanyController._withLatLng(company));
     } catch (error) {
       logger.error("Could not remove logo", error);
       return response
@@ -350,7 +375,7 @@ class CompanyController {
       const tenantId = request.params.tenant;
       const companyId = request.params.id;
       if (
-        !(await CompanyController.isOwnerOrAdmin(
+        !(await CompanyController.isCompanyManager(
           request.user.id,
           tenantId,
           companyId,
@@ -412,7 +437,7 @@ class CompanyController {
       const tenantId = request.params.tenant;
       const companyId = request.params.id;
       if (
-        !(await CompanyController.isOwnerOrAdmin(
+        !(await CompanyController.isCompanyManager(
           request.user.id,
           tenantId,
           companyId,
@@ -451,7 +476,7 @@ class CompanyController {
         tenantId,
         request.params.id,
       );
-      return response.status(200).send(company);
+      return response.status(200).send(CompanyController._withLatLng(company));
     } catch (error) {
       logger.error("Could not verify company", error);
       return response
@@ -470,7 +495,7 @@ class CompanyController {
         tenantId,
         request.params.id,
       );
-      return response.status(200).send(company);
+      return response.status(200).send(CompanyController._withLatLng(company));
     } catch (error) {
       logger.error("Could not block company", error);
       return response
@@ -491,10 +516,14 @@ class CompanyController {
       if (!access.isAdmin && !access.member) {
         return response.sendStatus(403);
       }
-      const branches = await CompanyService.getCompanyBranches(
+      let branches = await CompanyService.getCompanyBranches(
         tenantId,
         companyId,
       );
+      const scope = CompanyController._memberBranchScope(access);
+      if (scope !== null) {
+        branches = branches.filter((b) => b.id === scope);
+      }
       return response.status(200).send(branches);
     } catch (error) {
       logger.error(error);
@@ -511,6 +540,10 @@ class CompanyController {
         companyId,
       );
       if (!access.isAdmin && !access.member) {
+        return response.sendStatus(403);
+      }
+      const scope = CompanyController._memberBranchScope(access);
+      if (scope !== null && branchId !== scope) {
         return response.sendStatus(403);
       }
       const branch = await CompanyService.getCompanyBranch(
@@ -535,7 +568,7 @@ class CompanyController {
         tenantId,
         companyId,
       );
-      if (!access.isAdmin && !(access.member && access.member.isOwner)) {
+      if (!CompanyController._isManager(access)) {
         return response.sendStatus(403);
       }
       const branch = await CompanyService.createCompanyBranch(
@@ -588,7 +621,7 @@ class CompanyController {
         tenantId,
         companyId,
       );
-      if (!access.isAdmin && !(access.member && access.member.isOwner)) {
+      if (!CompanyController._isManager(access)) {
         return response.sendStatus(403);
       }
       const branch = await CompanyService.removeCompanyBranch(
@@ -702,12 +735,16 @@ class CompanyController {
   static async inviteMember(request, response) {
     try {
       const { tenant: tenantId, id: companyId } = request.params;
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      const targetBranchId = (request.body && request.body.branchId) || "";
+      const scope = CompanyController._memberBranchScope(access);
       if (
-        !(await CompanyController.isOwnerOrAdmin(
-          request.user.id,
-          tenantId,
-          companyId,
-        ))
+        !CompanyController._isManager(access) &&
+        !(access.member !== null && scope === targetBranchId)
       ) {
         return response.sendStatus(403);
       }
@@ -729,19 +766,22 @@ class CompanyController {
   static async listMembers(request, response) {
     try {
       const { tenant: tenantId, id: companyId } = request.params;
-      if (
-        !(await CompanyController.isMemberOrAdmin(
-          request.user.id,
-          tenantId,
-          companyId,
-        ))
-      ) {
-        return response.sendStatus(403);
-      }
-      const members = await CompanyService.listCompanyMembers(
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
         tenantId,
         companyId,
       );
+      if (!access.isAdmin && !access.member) {
+        return response.sendStatus(403);
+      }
+      let members = await CompanyService.listCompanyMembers(
+        tenantId,
+        companyId,
+      );
+      const scope = CompanyController._memberBranchScope(access);
+      if (scope !== null) {
+        members = members.filter((m) => (m.branchId || "") === scope);
+      }
       return response.status(200).send(members);
     } catch (error) {
       logger.error(error);
@@ -752,19 +792,20 @@ class CompanyController {
   static async removeMember(request, response) {
     try {
       const { tenant: tenantId, id: companyId, userId } = request.params;
-      if (
-        !(await CompanyController.isOwnerOrAdmin(
-          request.user.id,
-          tenantId,
-          companyId,
-        ))
-      ) {
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!access.isAdmin && !access.member) {
         return response.sendStatus(403);
       }
+      const scope = CompanyController._memberBranchScope(access);
       const result = await CompanyService.removeCompanyMember(
         tenantId,
         companyId,
         userId,
+        scope,
       );
       return response.status(200).send(result);
     } catch (error) {
@@ -800,16 +841,28 @@ class CompanyController {
     );
   }
 
-  static async isOwnerOrAdmin(userId, tenantId, companyId) {
-    if (await CompanyController.isTenantAdmin(userId, tenantId)) {
-      return true;
-    }
-    const member = await CompanyMemberManager.getMemberByUser(tenantId, userId);
+  static _isManager(access) {
     return (
-      member !== null &&
-      member.companyId === companyId &&
-      member.isOwner === true
+      access.isAdmin ||
+      (access.member !== null &&
+        (access.member.isOwner === true || access.member.branchId === ""))
     );
+  }
+
+  static _memberBranchScope(access) {
+    if (CompanyController._isManager(access) || access.member === null) {
+      return null;
+    }
+    return access.member.branchId;
+  }
+
+  static async isCompanyManager(userId, tenantId, companyId) {
+    const access = await CompanyController.getBranchAccess(
+      userId,
+      tenantId,
+      companyId,
+    );
+    return CompanyController._isManager(access);
   }
 
   static async isMemberOrAdmin(userId, tenantId, companyId) {

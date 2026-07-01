@@ -9,11 +9,16 @@ const CompanyManager = require("../../data-managers/company-manager");
 const CompanyMemberManager = require("../../data-managers/company-member-manager");
 const CompanyMediaManager = require("../../data-managers/company-media-manager");
 const CompanyBranchManager = require("../../data-managers/company-branch-manager");
+const OfferManager = require("../../data-managers/offer-manager");
 const MemberInvitationManager = require("../../data-managers/member-invitation-manager");
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
 const { CompanyRoleService } = require("./company-role-service");
 const MailController = require("../../mail-service/mail-controller");
-const { isEmail } = require("validator");
+const { isEmail, isURL } = require("validator");
+
+const DESCRIPTION_MAX_LENGTH = 2000;
+const RESEND_VERIFICATION_COOLDOWN_MS = 60 * 1000;
+const lastVerificationResend = new Map();
 
 async function assertTaxonomyRef(tenantId, id, type, label) {
   if (!id) {
@@ -164,12 +169,87 @@ class CompanyService {
     const email = String(owner.id || "")
       .trim()
       .toLowerCase();
+    const password = String(owner.password || "");
+    const firstName = String(owner.firstName || "").trim();
+    const lastName = String(owner.lastName || "").trim();
+    const name = String(companyData.name || "").trim();
+    const street = String(companyData.street || "").trim();
+    const postalCode = String(companyData.postalCode || "").trim();
+    const city = String(companyData.city || "").trim();
+    const phone = String(companyData.phone || "").trim();
+    const website = String(companyData.website || "").trim();
+    const mail = String(companyData.mail || "").trim();
+    const hasLetter = (value) => /[A-Za-zÀ-ÿ]/.test(value);
 
-    if (!email || !owner.password || !companyData.name) {
-      throw { message: "Missing required parameters", status: 400 };
+    if (!isEmail(email)) {
+      throw { message: "A valid email address is required", status: 400 };
     }
-    if (String(owner.password).length < 8) {
-      throw { message: "Password must be at least 8 characters", status: 400 };
+    if (
+      password.length < 8 ||
+      !/[A-Za-z]/.test(password) ||
+      !/\d/.test(password)
+    ) {
+      throw {
+        message:
+          "Password must be at least 8 characters and include a letter and a number",
+        status: 400,
+      };
+    }
+    if (
+      firstName.length < 2 ||
+      !hasLetter(firstName) ||
+      lastName.length < 2 ||
+      !hasLetter(lastName)
+    ) {
+      throw {
+        message: "A valid first and last name are required",
+        status: 400,
+      };
+    }
+    if (name.length < 2 || !hasLetter(name)) {
+      throw { message: "A valid company name is required", status: 400 };
+    }
+    if (street.length < 2 || !hasLetter(street)) {
+      throw { message: "A valid street is required", status: 400 };
+    }
+    if (!/^\d{5}$/.test(postalCode)) {
+      throw { message: "Postal code must be 5 digits", status: 400 };
+    }
+    if (city.length < 2 || !hasLetter(city)) {
+      throw { message: "A valid city is required", status: 400 };
+    }
+    if (phone.replace(/\D/g, "").length < 6) {
+      throw { message: "A valid phone number is required", status: 400 };
+    }
+    if (
+      website &&
+      !isURL(website, { protocols: ["https"], require_protocol: true })
+    ) {
+      throw { message: "Website must be a valid https:// URL", status: 400 };
+    }
+    if (mail && !isEmail(mail)) {
+      throw { message: "Invalid contact email", status: 400 };
+    }
+    if (String(companyData.description || "").length > DESCRIPTION_MAX_LENGTH) {
+      throw {
+        message: `Description must be at most ${DESCRIPTION_MAX_LENGTH} characters`,
+        status: 400,
+      };
+    }
+    const hasLat =
+      companyData.lat !== undefined &&
+      companyData.lat !== null &&
+      companyData.lat !== "";
+    const hasLng =
+      companyData.lng !== undefined &&
+      companyData.lng !== null &&
+      companyData.lng !== "";
+    let location = null;
+    if (hasLat || hasLng) {
+      if (!(hasLat && hasLng)) {
+        throw { message: "Both lat and lng are required", status: 400 };
+      }
+      location = buildLocation(companyData.lat, companyData.lng);
     }
     if (
       !consents.privacyConsent ||
@@ -234,20 +314,20 @@ class CompanyService {
     const company = await CompanyManager.storeCompany({
       id: uuidv4(),
       tenantId,
-      name: companyData.name,
+      name,
       slug: companyData.slug,
       status: "unverified",
-      mail: companyData.mail,
-      phone: companyData.phone,
-      website: companyData.website,
-      street: companyData.street,
-      postalCode: companyData.postalCode,
-      city: companyData.city,
+      mail,
+      phone,
+      website,
+      street,
+      postalCode,
+      city,
       districtId: companyData.districtId,
       industryId: companyData.industryId,
       sizeId: companyData.sizeId,
-      logoUrl: companyData.logoUrl,
       description: companyData.description,
+      location,
     });
 
     await CompanyMemberManager.storeMember({
@@ -269,6 +349,19 @@ class CompanyService {
       throw { message: "Missing email", status: 400 };
     }
 
+    const throttleKey = `${tenantId}:${normalized}`;
+    const now = Date.now();
+    const lastSent = lastVerificationResend.get(throttleKey);
+    if (lastSent && now - lastSent < RESEND_VERIFICATION_COOLDOWN_MS) {
+      const retryAfter = Math.ceil(
+        (RESEND_VERIFICATION_COOLDOWN_MS - (now - lastSent)) / 1000,
+      );
+      throw {
+        message: `Please wait ${retryAfter}s before requesting another verification email`,
+        status: 429,
+      };
+    }
+
     const member = await CompanyMemberManager.getMemberByUser(
       tenantId,
       normalized,
@@ -287,6 +380,14 @@ class CompanyService {
 
     const MailController = require("../../mail-service/mail-controller");
     await MailController.sendVerificationRequest(user.id, hook.id);
+
+    // Best-effort per-process cooldown, started only after a mail actually went
+    // out; the key self-evicts after the window so the map stays bounded.
+    lastVerificationResend.set(throttleKey, now);
+    setTimeout(
+      () => lastVerificationResend.delete(throttleKey),
+      RESEND_VERIFICATION_COOLDOWN_MS,
+    ).unref();
   }
 
   static async verifyCompany(tenantId, companyId) {
@@ -372,6 +473,30 @@ class CompanyService {
       "Unternehmensgröße",
     );
 
+    const hasLat =
+      payload.lat !== undefined && payload.lat !== null && payload.lat !== "";
+    const hasLng =
+      payload.lng !== undefined && payload.lng !== null && payload.lng !== "";
+    let location;
+    if (hasLat || hasLng) {
+      if (!(hasLat && hasLng)) {
+        throw { message: "Both lat and lng are required", status: 400 };
+      }
+      location = buildLocation(payload.lat, payload.lng);
+    } else {
+      location = company.location !== undefined ? company.location : null;
+    }
+
+    if (
+      payload.description !== undefined &&
+      String(payload.description).length > DESCRIPTION_MAX_LENGTH
+    ) {
+      throw {
+        message: `Description must be at most ${DESCRIPTION_MAX_LENGTH} characters`,
+        status: 400,
+      };
+    }
+
     const pick = (key) =>
       payload[key] !== undefined ? payload[key] : company[key];
 
@@ -392,6 +517,7 @@ class CompanyService {
         payload.description !== undefined
           ? String(payload.description)
           : company.description,
+      location,
     };
 
     await CompanyManager.storeCompany(updated);
@@ -507,12 +633,17 @@ class CompanyService {
         status: 409,
       };
     }
-    const count = await CompanyBranchManager.countByCompany(
+    const offerCount = await OfferManager.countByBranch(
       tenantId,
       companyId,
+      branchId,
     );
-    if (count <= 1) {
-      throw { message: "A company must keep at least one branch", status: 409 };
+    if (offerCount > 0) {
+      throw {
+        message:
+          "Branch still has internships assigned; reassign or remove them first",
+        status: 409,
+      };
     }
     await CompanyBranchManager.removeBranch(tenantId, branchId);
     return branch;
@@ -626,18 +757,34 @@ class CompanyService {
     return [...active, ...invitations.map(toMemberInvitationDto)];
   }
 
-  static async removeCompanyMember(tenantId, companyId, targetUserId) {
+  static async removeCompanyMember(
+    tenantId,
+    companyId,
+    targetUserId,
+    scopeBranchId = null,
+  ) {
     const userId = String(targetUserId || "")
       .trim()
       .toLowerCase();
+    const outOfScope = (branchId) =>
+      scopeBranchId !== null && (branchId || "") !== scopeBranchId;
     const member = await CompanyMemberManager.getMemberByUser(tenantId, userId);
     if (member && member.companyId === companyId) {
       if (member.isOwner === true) {
         throw { message: "The company owner cannot be removed", status: 403 };
       }
+      if (outOfScope(member.branchId)) {
+        throw {
+          message: "You can only manage members in your own branch",
+          status: 403,
+        };
+      }
       await CompanyMemberManager.removeMember(tenantId, companyId, userId);
       await MembershipManager.removeMembership(tenantId, userId);
-      await UserManager.deleteUser(userId);
+      const remaining = await MembershipManager.getMembershipsByUserID(userId);
+      if (!remaining || remaining.length === 0) {
+        await UserManager.deleteUser(userId);
+      }
       return { removed: userId };
     }
     const pending = await MemberInvitationManager.getPendingByEmail(
@@ -646,6 +793,12 @@ class CompanyService {
       userId,
     );
     if (pending) {
+      if (outOfScope(pending.branchId)) {
+        throw {
+          message: "You can only manage members in your own branch",
+          status: 403,
+        };
+      }
       await MemberInvitationManager.remove(tenantId, pending.id);
       return { removed: userId };
     }

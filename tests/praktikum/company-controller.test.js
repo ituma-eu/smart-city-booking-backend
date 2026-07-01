@@ -130,8 +130,23 @@ describe("CompanyController — authz & handlers", () => {
       expect(CompanyService.updateCompanyProfile.called).to.equal(false);
     });
 
-    it("a non-owner member cannot edit (403)", async () => {
-      asMemberOf("c1");
+    it("an all-scope member (branchId '') can edit (200)", async () => {
+      CompanyMemberManager.getMemberByUser.resolves({
+        companyId: "c1",
+        isOwner: false,
+        branchId: "",
+      });
+      const r = res();
+      await CompanyController.updateProfile(req(), r);
+      expect(r.statusCode).to.equal(200);
+    });
+
+    it("a branch-scoped member cannot edit (403)", async () => {
+      CompanyMemberManager.getMemberByUser.resolves({
+        companyId: "c1",
+        isOwner: false,
+        branchId: "b1",
+      });
       const r = res();
       await CompanyController.updateProfile(req(), r);
       expect(r.statusCode).to.equal(403);
@@ -380,6 +395,30 @@ describe("CompanyController — authz & handlers", () => {
         expect(r.statusCode).to.equal(200);
       });
 
+      it("a branch-scoped member sees only their own branch", async () => {
+        asBranchMember("c1", "b1");
+        CompanyService.getCompanyBranches.resolves([
+          { id: "b1" },
+          { id: "b2" },
+        ]);
+        const r = res();
+        await CompanyController.listBranches(req(), r);
+        expect(r.statusCode).to.equal(200);
+        expect(r.body).to.deep.equal([{ id: "b1" }]);
+      });
+
+      it("an all-scope member sees all branches", async () => {
+        asBranchMember("c1", "");
+        CompanyService.getCompanyBranches.resolves([
+          { id: "b1" },
+          { id: "b2" },
+        ]);
+        const r = res();
+        await CompanyController.listBranches(req(), r);
+        expect(r.statusCode).to.equal(200);
+        expect(r.body).to.have.length(2);
+      });
+
       it("a stranger cannot list (403)", async () => {
         const r = res();
         await CompanyController.listBranches(req(), r);
@@ -395,14 +434,35 @@ describe("CompanyController — authz & handlers", () => {
         expect(CompanyService.getCompanyBranches.called).to.equal(false);
       });
 
-      it("a member can get one (200)", async () => {
-        asMemberOf("c1");
+      it("an all-scope member gets any branch (200)", async () => {
+        asBranchMember("c1", "");
         const r = res();
         await CompanyController.getBranch(
           req({ params: { branchId: "b1" } }),
           r,
         );
         expect(r.statusCode).to.equal(200);
+      });
+
+      it("a branch-scoped member gets OWN branch (200)", async () => {
+        asBranchMember("c1", "b1");
+        const r = res();
+        await CompanyController.getBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(200);
+      });
+
+      it("a branch-scoped member cannot get ANOTHER branch (403)", async () => {
+        asBranchMember("c1", "b2");
+        const r = res();
+        await CompanyController.getBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.getCompanyBranch.called).to.equal(false);
       });
 
       it("a member of another company cannot get one (403)", async () => {
@@ -417,7 +477,7 @@ describe("CompanyController — authz & handlers", () => {
       });
 
       it("surfaces a service 404 for an unknown branch", async () => {
-        asMemberOf("c1");
+        asOwnerOf("c1");
         CompanyService.getCompanyBranch.rejects({
           status: 404,
           message: "Branch not found",
@@ -431,7 +491,7 @@ describe("CompanyController — authz & handlers", () => {
       });
     });
 
-    describe("create (owner or admin only)", () => {
+    describe("create (owner / admin / all-scope member)", () => {
       it("owner creates (201) and the body is forwarded + result returned", async () => {
         asOwnerOf("c1");
         const r = res();
@@ -452,12 +512,11 @@ describe("CompanyController — authz & handlers", () => {
         expect(r.statusCode).to.equal(201);
       });
 
-      it("a non-owner member cannot create (403)", async () => {
-        asMemberOf("c1");
+      it("an all-scope member (branchId '') creates (201)", async () => {
+        asBranchMember("c1", "");
         const r = res();
         await CompanyController.createBranch(req({ body: { name: "X" } }), r);
-        expect(r.statusCode).to.equal(403);
-        expect(CompanyService.createCompanyBranch.called).to.equal(false);
+        expect(r.statusCode).to.equal(201);
       });
 
       it("a branch-scoped member cannot create (403)", async () => {
@@ -552,7 +611,7 @@ describe("CompanyController — authz & handlers", () => {
       });
     });
 
-    describe("delete (owner or admin only)", () => {
+    describe("delete (owner / admin / all-scope member)", () => {
       it("owner deletes (200) and returns { id }", async () => {
         asOwnerOf("c1");
         const r = res();
@@ -571,8 +630,18 @@ describe("CompanyController — authz & handlers", () => {
         expect(r.body).to.deep.equal({ id: "b1" });
       });
 
-      it("a non-owner member cannot delete (403)", async () => {
-        asMemberOf("c1");
+      it("an all-scope member (branchId '') deletes (200)", async () => {
+        asBranchMember("c1", "");
+        const r = res();
+        await CompanyController.removeBranch(
+          req({ params: { branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(200);
+      });
+
+      it("a branch-scoped member cannot delete (403)", async () => {
+        asBranchMember("c1", "b1");
         const r = res();
         await CompanyController.removeBranch(
           req({ params: { branchId: "b1" } }),
@@ -759,7 +828,14 @@ describe("CompanyController — authz & handlers", () => {
   });
 
   describe("members — invite / list / remove / accept authz", () => {
-    describe("invite (owner or admin)", () => {
+    describe("invite (owner / admin / all-scope / own-branch member)", () => {
+      const asBranchMember = (cid, branchId) =>
+        CompanyMemberManager.getMemberByUser.resolves({
+          companyId: cid,
+          isOwner: false,
+          branchId,
+        });
+
       it("owner invites (201)", async () => {
         asOwnerOf("c1");
         const r = res();
@@ -778,10 +854,44 @@ describe("CompanyController — authz & handlers", () => {
         expect(r.statusCode).to.equal(201);
       });
 
-      it("a non-owner member cannot invite (403)", async () => {
-        asMemberOf("c1");
+      it("an all-scope member (branchId '') invites into any branch (201)", async () => {
+        asBranchMember("c1", "");
         const r = res();
-        await CompanyController.inviteMember(req({ body: {} }), r);
+        await CompanyController.inviteMember(
+          req({ body: { email: "m@x.de", branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(201);
+      });
+
+      it("a branch-scoped member invites into their OWN branch (201)", async () => {
+        asBranchMember("c1", "b1");
+        const r = res();
+        await CompanyController.inviteMember(
+          req({ body: { email: "m@x.de", branchId: "b1" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(201);
+      });
+
+      it("a branch-scoped member cannot invite into ANOTHER branch (403)", async () => {
+        asBranchMember("c1", "b1");
+        const r = res();
+        await CompanyController.inviteMember(
+          req({ body: { email: "m@x.de", branchId: "b2" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(403);
+        expect(CompanyService.inviteMember.called).to.equal(false);
+      });
+
+      it("a branch-scoped member cannot invite an all-scope member (403)", async () => {
+        asBranchMember("c1", "b1");
+        const r = res();
+        await CompanyController.inviteMember(
+          req({ body: { email: "m@x.de" } }),
+          r,
+        );
         expect(r.statusCode).to.equal(403);
         expect(CompanyService.inviteMember.called).to.equal(false);
       });
@@ -809,6 +919,39 @@ describe("CompanyController — authz & handlers", () => {
         expect(r.statusCode).to.equal(200);
       });
 
+      it("a branch-scoped member sees only own-branch members", async () => {
+        CompanyMemberManager.getMemberByUser.resolves({
+          companyId: "c1",
+          isOwner: false,
+          branchId: "b1",
+        });
+        CompanyService.listCompanyMembers.resolves([
+          { userId: "owner@x.de", branchId: "" },
+          { userId: "a@x.de", branchId: "b1" },
+          { userId: "b@x.de", branchId: "b2" },
+        ]);
+        const r = res();
+        await CompanyController.listMembers(req(), r);
+        expect(r.statusCode).to.equal(200);
+        expect(r.body).to.deep.equal([{ userId: "a@x.de", branchId: "b1" }]);
+      });
+
+      it("an all-scope member sees all members", async () => {
+        CompanyMemberManager.getMemberByUser.resolves({
+          companyId: "c1",
+          isOwner: false,
+          branchId: "",
+        });
+        CompanyService.listCompanyMembers.resolves([
+          { userId: "a@x.de", branchId: "b1" },
+          { userId: "b@x.de", branchId: "b2" },
+        ]);
+        const r = res();
+        await CompanyController.listMembers(req(), r);
+        expect(r.statusCode).to.equal(200);
+        expect(r.body).to.have.length(2);
+      });
+
       it("a stranger cannot list (403)", async () => {
         const r = res();
         await CompanyController.listMembers(req(), r);
@@ -824,8 +967,8 @@ describe("CompanyController — authz & handlers", () => {
       });
     });
 
-    describe("remove (owner or admin)", () => {
-      it("owner removes a member (200)", async () => {
+    describe("remove (owner / admin / all-scope / own-branch member)", () => {
+      it("owner removes a member (200), no branch scope", async () => {
         asOwnerOf("c1");
         const r = res();
         await CompanyController.removeMember(
@@ -834,17 +977,58 @@ describe("CompanyController — authz & handlers", () => {
         );
         expect(r.statusCode).to.equal(200);
         expect(r.body).to.deep.equal({ removed: "m@x.de" });
+        expect(
+          CompanyService.removeCompanyMember.calledWith(
+            "kielregion",
+            "c1",
+            "m@x.de",
+            null,
+          ),
+        ).to.equal(true);
       });
 
-      it("a non-owner member cannot remove (403)", async () => {
-        asMemberOf("c1");
+      it("an all-scope member (branchId '') removes a member (200), no branch scope", async () => {
+        CompanyMemberManager.getMemberByUser.resolves({
+          companyId: "c1",
+          isOwner: false,
+          branchId: "",
+        });
         const r = res();
         await CompanyController.removeMember(
           req({ params: { userId: "m@x.de" } }),
           r,
         );
-        expect(r.statusCode).to.equal(403);
-        expect(CompanyService.removeCompanyMember.called).to.equal(false);
+        expect(r.statusCode).to.equal(200);
+        expect(
+          CompanyService.removeCompanyMember.calledWith(
+            "kielregion",
+            "c1",
+            "m@x.de",
+            null,
+          ),
+        ).to.equal(true);
+      });
+
+      it("a branch-scoped member remove forwards its branch scope to the service", async () => {
+        CompanyMemberManager.getMemberByUser.resolves({
+          companyId: "c1",
+          isOwner: false,
+          branchId: "b1",
+        });
+        const r = res();
+        await CompanyController.removeMember(
+          req({ params: { userId: "m@x.de" } }),
+          r,
+        );
+        expect(r.statusCode).to.equal(200);
+        expect(
+          CompanyService.removeCompanyMember.calledWith(
+            "kielregion",
+            "c1",
+            "m@x.de",
+            "b1",
+          ),
+        ).to.equal(true);
       });
 
       it("a member of another company cannot remove (403)", async () => {
