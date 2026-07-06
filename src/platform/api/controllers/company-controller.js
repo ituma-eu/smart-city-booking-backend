@@ -197,6 +197,10 @@ class CompanyController {
         tenantId,
         request.params.id,
       );
+      const branches = await CompanyService.getCompanyBranches(
+        tenantId,
+        request.params.id,
+      );
       return response.status(200).send({
         id: company.id,
         name: company.name,
@@ -226,6 +230,7 @@ class CompanyController {
           type: item.type,
           created: item.created,
         })),
+        branches,
       });
     } catch (error) {
       logger.error(error);

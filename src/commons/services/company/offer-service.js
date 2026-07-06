@@ -95,6 +95,16 @@ function toOfferMediaDto(media) {
   };
 }
 
+function toPublicOfferMediaDto(media) {
+  return {
+    id: media.id,
+    offerId: media.offerId,
+    url: media.url,
+    type: media.type,
+    created: media.created,
+  };
+}
+
 async function validateOfferPayload(tenantId, companyId, payload) {
   const title = String(payload.title || "").trim();
   if (!title || title.length > 200) {
@@ -258,28 +268,30 @@ class OfferService {
     }
     const fields = await validateOfferPayload(tenantId, companyId, payload);
 
-    // Status is only changed when the client explicitly requests one (Entwurf /
-    // In Prüfung). A plain field edit (no status) keeps the offer where it is —
-    // editing a live Online listing must not silently unpublish it.
-    let status;
-    let publishedAt;
-    let reviewNote;
-    if (payload.status === undefined) {
-      status = existing.status;
-      publishedAt = existing.publishedAt;
-      reviewNote = existing.reviewNote;
-    } else {
-      const resolved = await OfferService._resolveStatus(
-        tenantId,
-        company,
-        requestedStatus(payload),
-      );
-      status = resolved.status;
-      publishedAt =
-        status === "Online" ? existing.publishedAt || Date.now() : null;
-      // keep the admin's rejection note while the company is still in Entwurf;
-      // clear it once the offer is (re)submitted / published
-      reviewNote = status === "Entwurf" ? existing.reviewNote : "";
+    // A company may only submit a draft for review or withdraw a pending offer.
+    // Any other requested status — including an echoed current status — leaves
+    // the offer where it is, so a live Online listing is never silently
+    // unpublished and an admin-archived offer cannot be self-republished.
+    let status = existing.status;
+    let publishedAt = existing.publishedAt;
+    let reviewNote = existing.reviewNote;
+    if (payload.status !== undefined && payload.status !== existing.status) {
+      if (payload.status === "In Prüfung" && existing.status === "Entwurf") {
+        const resolved = await OfferService._resolveStatus(
+          tenantId,
+          company,
+          "In Prüfung",
+        );
+        status = resolved.status;
+        publishedAt = status === "Online" ? Date.now() : null;
+        reviewNote = "";
+      } else if (
+        payload.status === "Entwurf" &&
+        existing.status === "In Prüfung"
+      ) {
+        status = "Entwurf";
+        publishedAt = null;
+      }
     }
 
     const loc = fields.branch ?? company;
@@ -398,7 +410,18 @@ class OfferService {
   }
 
   static async searchPublicOffers(tenantId, filters) {
-    const offers = await OfferManager.searchOnline(tenantId, filters);
+    const resolved = { ...filters };
+    if (filters.company) {
+      const companyIds = await CompanyManager.getCompanyIdsByName(
+        tenantId,
+        filters.company,
+      );
+      if (companyIds.length === 0) {
+        return [];
+      }
+      resolved.companyIds = companyIds;
+    }
+    const offers = await OfferManager.searchOnline(tenantId, resolved);
     return offers.map(toPublicOfferDto);
   }
 
@@ -408,7 +431,18 @@ class OfferService {
       throw { message: "Offer not found", status: 404 };
     }
     await OfferManager.incrementViews(tenantId, offerId);
-    return toPublicOfferDto({ ...offer, views: offer.views + 1 });
+    const media = await OfferMediaManager.getMediaByOffer(tenantId, offerId);
+    return {
+      ...toPublicOfferDto({ ...offer, views: offer.views + 1 }),
+      media: media.map(toPublicOfferMediaDto),
+    };
+  }
+
+  static async getPublicOffersByIds(tenantId, ids) {
+    const offers = await OfferManager.getOffersByIds(tenantId, ids);
+    return offers
+      .filter((offer) => offer.status === "Online")
+      .map(toPublicOfferDto);
   }
 
   static async listForModeration(tenantId, filters) {

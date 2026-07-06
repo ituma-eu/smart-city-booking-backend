@@ -256,6 +256,30 @@ describe("CompanyController — authz & handlers", () => {
       expect(r.body.media[0]).to.have.property("url", "http://x/m1.png");
     });
 
+    it("embeds the company's branches (Standorte)", async () => {
+      CompanyManager.getCompany.resolves({ id: "c1", status: "verified" });
+      CompanyService.getCompanyBranches.resolves([
+        {
+          id: "b1",
+          companyId: "c1",
+          name: "Hauptsitz",
+          city: "Kiel",
+          lat: 54.3,
+          lng: 10.1,
+          logoUrl: "",
+        },
+      ]);
+      const r = res();
+      await CompanyController.getPublicCompany(req(), r);
+      expect(r.statusCode).to.equal(200);
+      expect(r.body.branches).to.have.length(1);
+      expect(r.body.branches[0]).to.include({
+        id: "b1",
+        name: "Hauptsitz",
+        city: "Kiel",
+      });
+    });
+
     it("unverified company → 404", async () => {
       CompanyManager.getCompany.resolves({ id: "c1", status: "unverified" });
       const r = res();

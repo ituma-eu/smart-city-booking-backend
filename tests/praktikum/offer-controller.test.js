@@ -139,6 +139,17 @@ describe("OfferController", () => {
       expect(OfferService.updateOffer.called).to.equal(false);
     });
 
+    it('updateOffer -> 403 when a branch member moves the offer to company-level ("")', async () => {
+      // Can edit their own branch (b1) but NOT company-level ("").
+      CompanyController.canEditBranch.callsFake(
+        async (userId, tenant, company, branchId) => branchId === "b1",
+      );
+      const r = res();
+      await OfferController.updateOffer(req({ body: { branchId: "" } }), r);
+      expect(r.statusCode).to.equal(403);
+      expect(OfferService.updateOffer.called).to.equal(false);
+    });
+
     it("listModeration -> 403 for a non-admin", async () => {
       CompanyController.isTenantAdmin.resolves(false);
       const r = res();
@@ -194,6 +205,16 @@ describe("OfferController", () => {
       const f = OfferService.searchPublicOffers.firstCall.args[1];
       expect(f.lat).to.equal(undefined);
       expect(f.radiusMeters).to.equal(undefined);
+    });
+
+    it("passes the company-name filter through", async () => {
+      const r = res();
+      await OfferController.searchOffers(
+        req({ query: { company: "Nordlicht" } }),
+        r,
+      );
+      const f = OfferService.searchPublicOffers.firstCall.args[1];
+      expect(f.company).to.equal("Nordlicht");
     });
 
     it("stringifies an operator-injection attempt ($ne) instead of passing the object", async () => {

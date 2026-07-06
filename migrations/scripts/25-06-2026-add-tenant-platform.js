@@ -9,15 +9,16 @@ module.exports = {
       { $set: { platform: "" } },
     );
 
-    const existing = await Tenant.findOne({ id: "kielregion" });
+    const existing = await Tenant.findOne({ id: "praktikum-kielregion" });
     if (!existing) {
       await Tenant.create({
-        id: "kielregion",
+        id: "praktikum-kielregion",
         name: "KielRegion GmbH",
         location: "Haßstraße 3-5, 24103 Kiel",
         mail: "info@kielregion.de",
         phone: "+49 431 55 60 01-0",
         platform: "praktikumsboerse",
+        catalogParticipation: { visible: false },
       });
     }
   },
@@ -25,7 +26,7 @@ module.exports = {
   down: async function (mongoose) {
     const Tenant = mongoose.model("Tenant");
 
-    await Tenant.deleteOne({ id: "kielregion" });
+    await Tenant.deleteOne({ id: "praktikum-kielregion" });
     await Tenant.updateMany({}, { $unset: { platform: "" } });
   },
 };

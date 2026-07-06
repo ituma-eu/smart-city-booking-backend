@@ -136,9 +136,10 @@ class OfferController {
       ) {
         return response.sendStatus(403);
       }
-      const targetBranchId = request.body.branchId;
+      // Normalize the target scope: an absent/empty branchId means company-level ("")
+      // in the service, so any change of scope — including a move to "" — must be authorized.
+      const targetBranchId = String(request.body.branchId || "").trim();
       if (
-        targetBranchId &&
         targetBranchId !== existing.branchId &&
         !(await CompanyController.canEditBranch(
           request.user.id,
@@ -206,6 +207,7 @@ class OfferController {
         industryId: str(q.industryId),
         internshipTypeId: str(q.internshipTypeId),
         companyId: str(q.companyId),
+        company: str(q.company),
         districtId: str(q.districtId),
         city: str(q.city),
         q: str(q.q),

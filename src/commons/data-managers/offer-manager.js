@@ -18,6 +18,14 @@ class OfferManager {
     return raw.toEntity();
   }
 
+  static async getOffersByIds(tenantId, ids) {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return [];
+    }
+    const raw = await OfferModel.find({ tenantId, id: { $in: ids } });
+    return raw.map((doc) => doc.toEntity());
+  }
+
   static async storeOffer(offer, upsert = true) {
     const entity = offer instanceof Offer ? offer : new Offer(offer);
     entity.validate();
@@ -64,6 +72,8 @@ class OfferManager {
     }
     if (filters.companyId) {
       query.companyId = filters.companyId;
+    } else if (Array.isArray(filters.companyIds)) {
+      query.companyId = { $in: filters.companyIds };
     }
     if (filters.districtId) {
       query.districtId = filters.districtId;
@@ -71,11 +81,25 @@ class OfferManager {
     if (filters.city) {
       query.city = filters.city;
     }
+
+    const and = [];
     if (filters.q) {
-      query.title = { $regex: escapeRegex(filters.q), $options: "i" };
+      const term = { $regex: escapeRegex(filters.q), $options: "i" };
+      and.push({
+        $or: [
+          { title: term },
+          { requirements: term },
+          { additionalInfo: term },
+        ],
+      });
     }
     if (filters.minAge !== undefined && filters.minAge !== null) {
-      query.$or = [{ minAge: null }, { minAge: { $lte: filters.minAge } }];
+      and.push({
+        $or: [{ minAge: null }, { minAge: { $lte: filters.minAge } }],
+      });
+    }
+    if (and.length > 0) {
+      query.$and = and;
     }
 
     const hasGeo =

@@ -302,41 +302,56 @@ class CompanyService {
       company: companyData.name,
     });
     user.setPassword(owner.password);
-    await UserService.singUpUser(user, payload.nextUrl);
 
-    await MembershipManager.addMembership(tenantId, {
-      userId: email,
-      source: "public",
-      status: "pending",
-      owner: false,
-    });
-
-    const company = await CompanyManager.storeCompany({
-      id: uuidv4(),
-      tenantId,
-      name,
-      slug: companyData.slug,
-      status: "unverified",
-      mail,
-      phone,
-      website,
-      street,
-      postalCode,
-      city,
-      districtId: companyData.districtId,
-      industryId: companyData.industryId,
-      sizeId: companyData.sizeId,
-      description: companyData.description,
-      location,
-    });
-
-    await CompanyMemberManager.storeMember({
-      id: uuidv4(),
-      tenantId,
-      companyId: company.id,
-      userId: email,
-      isOwner: true,
-    });
+    let company = null;
+    try {
+      await UserService.singUpUser(user, payload.nextUrl);
+      await MembershipManager.addMembership(tenantId, {
+        userId: email,
+        source: "public",
+        status: "pending",
+        owner: false,
+      });
+      company = await CompanyManager.storeCompany({
+        id: uuidv4(),
+        tenantId,
+        name,
+        slug: companyData.slug,
+        status: "unverified",
+        mail,
+        phone,
+        website,
+        street,
+        postalCode,
+        city,
+        districtId: companyData.districtId,
+        industryId: companyData.industryId,
+        sizeId: companyData.sizeId,
+        description: companyData.description,
+        location,
+      });
+      await CompanyMemberManager.storeMember({
+        id: uuidv4(),
+        tenantId,
+        companyId: company.id,
+        userId: email,
+        isOwner: true,
+      });
+    } catch (err) {
+      if (company) {
+        await CompanyMemberManager.removeMember(
+          tenantId,
+          company.id,
+          email,
+        ).catch(() => {});
+        await CompanyManager.deleteCompany(tenantId, company.id).catch(
+          () => {},
+        );
+      }
+      await MembershipManager.removeMembership(tenantId, email).catch(() => {});
+      await UserManager.deleteUser(email).catch(() => {});
+      throw err;
+    }
 
     return company;
   }
@@ -664,6 +679,9 @@ class CompanyService {
     if (!company) {
       throw { message: "Company not found", status: 404 };
     }
+    if (company.status === "blocked") {
+      throw { message: "This company is blocked", status: 403 };
+    }
     const email = String(payload.email || "")
       .trim()
       .toLowerCase();
@@ -692,6 +710,10 @@ class CompanyService {
     if (existingMember) {
       throw { message: "This user already belongs to a company", status: 409 };
     }
+    const existingUser = await UserManager.getUserBy({ id: email });
+    if (existingUser) {
+      throw { message: "This email is already registered", status: 409 };
+    }
     const pending = await MemberInvitationManager.getPendingByEmailInTenant(
       tenantId,
       email,
@@ -716,6 +738,7 @@ class CompanyService {
       branchId,
       status: "pending",
       invitedBy,
+      expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
     });
 
     try {
@@ -814,8 +837,20 @@ class CompanyService {
     ) {
       throw { message: "Invalid or expired invitation", status: 404 };
     }
-    if (!password || String(password).length < 8) {
-      throw { message: "Password must be at least 8 characters", status: 400 };
+    if (invitation.expiresAt && invitation.expiresAt < Date.now()) {
+      throw { message: "This invitation has expired", status: 410 };
+    }
+    if (
+      !password ||
+      String(password).length < 8 ||
+      !/[A-Za-z]/.test(password) ||
+      !/\d/.test(password)
+    ) {
+      throw {
+        message:
+          "Password must be at least 8 characters and include a letter and a number",
+        status: 400,
+      };
     }
     const email = invitation.email;
     const company = await CompanyManager.getCompany(
@@ -825,6 +860,12 @@ class CompanyService {
     if (!company) {
       throw { message: "Company not found", status: 404 };
     }
+    if (company.status === "blocked") {
+      throw { message: "This company is blocked", status: 403 };
+    }
+    // Only a verified company grants immediate active access; for an unverified
+    // company the member stays pending (no role) until admin approval (verifyCompany).
+    const activate = company.status === "verified";
 
     const alreadyMember = await CompanyMemberManager.getMemberByUser(
       tenantId,
@@ -835,37 +876,41 @@ class CompanyService {
     }
 
     const existingUser = await UserManager.getUserBy({ id: email }, true);
-    if (!existingUser) {
-      const user = new User({
-        id: email,
-        firstName: invitation.firstName,
-        lastName: invitation.lastName,
-        phone: invitation.phone,
-        company: company.name,
-      });
-      user.setPassword(password);
-      user.isVerified = true;
-      await UserManager.createUser(user);
+    if (existingUser) {
+      throw { message: "This email is already registered", status: 409 };
     }
+    const user = new User({
+      id: email,
+      firstName: invitation.firstName,
+      lastName: invitation.lastName,
+      phone: invitation.phone,
+      company: company.name,
+    });
+    user.setPassword(password);
+    user.isVerified = true;
+    await UserManager.createUser(user);
 
     const role = await CompanyRoleService.ensureUnternehmenRole(tenantId);
     const membership = await MembershipManager.getMembershipByTenantAndUserID(
       tenantId,
       email,
     );
+    const membershipStatus = activate ? "active" : "pending";
     if (!membership) {
       await MembershipManager.addMembership(tenantId, {
         userId: email,
         source: "invite",
-        status: "active",
+        status: membershipStatus,
         owner: false,
       });
     } else {
       await MembershipManager.updateMembership(tenantId, email, {
-        status: "active",
+        status: membershipStatus,
       });
     }
-    await MembershipManager.addRoleToMembership(tenantId, email, role.id);
+    if (activate) {
+      await MembershipManager.addRoleToMembership(tenantId, email, role.id);
+    }
 
     let branchId = invitation.branchId || "";
     if (branchId) {

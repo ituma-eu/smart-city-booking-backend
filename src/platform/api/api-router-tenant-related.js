@@ -20,6 +20,9 @@ const CompanyController = require("./controllers/company-controller");
 const SettingsController = require("./controllers/settings-controller");
 const OfferController = require("./controllers/offer-controller");
 const TaxonomyController = require("./controllers/taxonomy-controller");
+const StudentController = require("./controllers/student-controller");
+const AccountDeletionController = require("./controllers/account-deletion-controller");
+const ApplicationController = require("./controllers/application-controller");
 const { optionalAuth } = require("../../middleware/auth-middleware");
 
 const router = express.Router({ mergeParams: true });
@@ -31,6 +34,55 @@ router.post("/companies/register", CompanyController.register);
 router.post(
   "/companies/resend-verification",
   CompanyController.resendVerification,
+);
+
+// STUDENTS
+// ========
+
+router.post("/students/register", StudentController.register);
+router.post(
+  "/students/resend-verification",
+  StudentController.resendVerification,
+);
+router.get(
+  "/students/me",
+  AuthenticationController.isSignedIn,
+  StudentController.getMe,
+);
+router.put(
+  "/students/me",
+  AuthenticationController.isSignedIn,
+  StudentController.updateMe,
+);
+router.delete(
+  "/students/me",
+  AuthenticationController.isSignedIn,
+  StudentController.deleteMe,
+);
+router.get(
+  "/students/me/bookmarks",
+  AuthenticationController.isSignedIn,
+  StudentController.getBookmarks,
+);
+router.post(
+  "/students/me/bookmarks",
+  AuthenticationController.isSignedIn,
+  StudentController.addBookmark,
+);
+router.delete(
+  "/students/me/bookmarks/:offerId",
+  AuthenticationController.isSignedIn,
+  StudentController.removeBookmark,
+);
+router.get(
+  "/admin/account-deletions",
+  AuthenticationController.isSignedIn,
+  AccountDeletionController.getStats,
+);
+router.get(
+  "/students/me/applications",
+  AuthenticationController.isSignedIn,
+  ApplicationController.listMine,
 );
 router.get(
   "/companies",
@@ -169,6 +221,41 @@ router.put(
 // public
 router.get("/offers", OfferController.searchOffers);
 router.get("/offers/:offerId/public", OfferController.getPublicOffer);
+router.post(
+  "/offers/:offerId/applications",
+  AuthenticationController.isSignedIn,
+  ApplicationController.submit,
+);
+router.get(
+  "/companies/:id/applications",
+  AuthenticationController.isSignedIn,
+  ApplicationController.listForCompany,
+);
+router.put(
+  "/companies/:id/applications/:applicationId/status",
+  AuthenticationController.isSignedIn,
+  ApplicationController.updateStatus,
+);
+router.post(
+  "/applications/:id/documents",
+  AuthenticationController.isSignedIn,
+  ApplicationController.uploadDocument,
+);
+router.get(
+  "/applications/:id/documents",
+  AuthenticationController.isSignedIn,
+  ApplicationController.listDocuments,
+);
+router.get(
+  "/applications/:id/documents/:docId/download",
+  AuthenticationController.isSignedIn,
+  ApplicationController.downloadDocument,
+);
+router.delete(
+  "/applications/:id/documents/:docId",
+  AuthenticationController.isSignedIn,
+  ApplicationController.removeDocument,
+);
 
 // moderation (admin)
 router.get(

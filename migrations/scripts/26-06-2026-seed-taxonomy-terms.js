@@ -1,4 +1,4 @@
-const TENANT_ID = "kielregion";
+const TENANT_ID = "praktikum-kielregion";
 
 const INDUSTRY_COLORS = {
   "Bau, Architektur, Vermessung": "#1f4f86",

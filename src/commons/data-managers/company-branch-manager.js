@@ -17,10 +17,6 @@ class CompanyBranchManager {
     return raw.toEntity();
   }
 
-  static async countByCompany(tenantId, companyId) {
-    return CompanyBranchModel.countDocuments({ tenantId, companyId });
-  }
-
   static async storeBranch(branch, upsert = true) {
     const branchEntity =
       branch instanceof CompanyBranch ? branch : new CompanyBranch(branch);

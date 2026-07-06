@@ -288,6 +288,33 @@ describe("OfferService", () => {
       expect(OfferManager.incrementViews.calledOnce).to.equal(true);
       expect(dto.views).to.equal(5);
       expect(dto).to.not.have.property("reviewNote");
+      expect(dto.media).to.deep.equal([]);
+    });
+    it("getPublicOffer: attaches public media[] without fileName", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        status: "Online",
+        views: 0,
+        location: null,
+      });
+      OfferMediaManager.getMediaByOffer.resolves([
+        {
+          id: "m1",
+          offerId: "o1",
+          url: "http://x/a",
+          fileName: "public/offer-media/a",
+          type: "image",
+          created: 1,
+        },
+      ]);
+      const dto = await OfferService.getPublicOffer("kg", "o1");
+      expect(dto.media).to.have.length(1);
+      expect(dto.media[0]).to.include({
+        id: "m1",
+        url: "http://x/a",
+        type: "image",
+      });
+      expect(dto.media[0]).to.not.have.property("fileName");
     });
     it("searchPublicOffers: returns public DTOs without reviewNote", async () => {
       OfferManager.searchOnline.resolves([
@@ -296,6 +323,7 @@ describe("OfferService", () => {
       const list = await OfferService.searchPublicOffers("kg", {});
       expect(list).to.have.length(1);
       expect(list[0]).to.not.have.property("reviewNote");
+      expect(list[0]).to.not.have.property("media");
     });
   });
 
@@ -357,7 +385,7 @@ describe("OfferService", () => {
       expect(dto.lat).to.equal(54.32);
     });
 
-    it("explicit Entwurf unpublishes (publishedAt null) but keeps the rejection note", async () => {
+    it("ignores an explicit Entwurf on an Online offer (no self-unpublish)", async () => {
       OfferManager.getOffer.resolves(existingOffer());
       const dto = await OfferService.updateOffer(
         "kg",
@@ -365,13 +393,28 @@ describe("OfferService", () => {
         "o1",
         basePayload({ status: "Entwurf" }),
       );
-      expect(dto.status).to.equal("Entwurf");
-      expect(dto.publishedAt).to.equal(null);
+      expect(dto.status).to.equal("Online");
+      expect(dto.publishedAt).to.equal(1000);
       expect(dto.reviewNote).to.equal("old note");
     });
 
-    it("explicit In Prüfung clears the note and (direct-publish OFF) drops publishedAt", async () => {
-      OfferManager.getOffer.resolves(existingOffer());
+    it("does not republish an admin-archived offer (Archiv stays Archiv)", async () => {
+      OfferManager.getOffer.resolves(
+        existingOffer({ status: "Archiv", publishedAt: null, reviewNote: "" }),
+      );
+      const dto = await OfferService.updateOffer(
+        "kg",
+        "c1",
+        "o1",
+        basePayload({ status: "In Prüfung" }),
+      );
+      expect(dto.status).to.equal("Archiv");
+    });
+
+    it("submits a draft for review (Entwurf → In Prüfung, direct-publish OFF): clears the note, stays unpublished", async () => {
+      OfferManager.getOffer.resolves(
+        existingOffer({ status: "Entwurf", publishedAt: null }),
+      );
       const dto = await OfferService.updateOffer(
         "kg",
         "c1",
@@ -381,6 +424,20 @@ describe("OfferService", () => {
       expect(dto.status).to.equal("In Prüfung");
       expect(dto.publishedAt).to.equal(null);
       expect(dto.reviewNote).to.equal("");
+    });
+
+    it("withdraws a pending offer back to Entwurf (In Prüfung → Entwurf)", async () => {
+      OfferManager.getOffer.resolves(
+        existingOffer({ status: "In Prüfung", publishedAt: null }),
+      );
+      const dto = await OfferService.updateOffer(
+        "kg",
+        "c1",
+        "o1",
+        basePayload({ status: "Entwurf" }),
+      );
+      expect(dto.status).to.equal("Entwurf");
+      expect(dto.publishedAt).to.equal(null);
     });
 
     it("404 when the offer belongs to another company", async () => {
@@ -598,10 +655,16 @@ describe("OfferManager — searchOnline query building", () => {
     expect(captured.query.status).to.equal("Online");
   });
 
-  it("escapes the q regex (no injection / ReDoS)", async () => {
+  it("q searches title + requirements + additionalInfo, regex-escaped", async () => {
     await OfferManager2.searchOnline("kg", { q: "(a+)+$" });
-    expect(captured.query.title.$regex).to.equal("\\(a\\+\\)\\+\\$");
-    expect(captured.query.title.$options).to.equal("i");
+    const or = captured.query.$and[0].$or;
+    expect(or.map((clause) => Object.keys(clause)[0])).to.deep.equal([
+      "title",
+      "requirements",
+      "additionalInfo",
+    ]);
+    expect(or[0].title.$regex).to.equal("\\(a\\+\\)\\+\\$");
+    expect(or[0].title.$options).to.equal("i");
   });
 
   it("builds a 2dsphere $near query for geo filters", async () => {
@@ -631,9 +694,83 @@ describe("OfferManager — searchOnline query building", () => {
 
   it("minAge filter matches no-minAge OR minAge<=age", async () => {
     await OfferManager2.searchOnline("kg", { minAge: 16 });
-    expect(captured.query.$or).to.deep.equal([
+    expect(captured.query.$and[0].$or).to.deep.equal([
       { minAge: null },
       { minAge: { $lte: 16 } },
     ]);
+  });
+
+  it("combines q and minAge under $and (no clobbering)", async () => {
+    await OfferManager2.searchOnline("kg", { q: "tischler", minAge: 16 });
+    expect(captured.query.$and).to.have.length(2);
+    expect(Object.keys(captured.query.$and[0].$or[0])).to.deep.equal(["title"]);
+    expect(captured.query.$and[1].$or).to.deep.equal([
+      { minAge: null },
+      { minAge: { $lte: 16 } },
+    ]);
+  });
+
+  it("companyIds becomes a $in filter", async () => {
+    await OfferManager2.searchOnline("kg", { companyIds: ["c1", "c2"] });
+    expect(captured.query.companyId).to.deep.equal({ $in: ["c1", "c2"] });
+  });
+
+  it("exact companyId takes precedence over companyIds", async () => {
+    await OfferManager2.searchOnline("kg", {
+      companyId: "c1",
+      companyIds: ["c2"],
+    });
+    expect(captured.query.companyId).to.equal("c1");
+  });
+});
+
+describe("OfferService — searchPublicOffers (company-name resolution)", () => {
+  let sandbox;
+  let CompanyManager;
+  let OfferManager3;
+  let OfferService3;
+
+  beforeEach(() => {
+    sandbox = sinon.createSandbox();
+    CompanyManager = { getCompanyIdsByName: sandbox.stub().resolves([]) };
+    OfferManager3 = { searchOnline: sandbox.stub().resolves([]) };
+    mock("../../src/commons/data-managers/company-manager", CompanyManager);
+    mock("../../src/commons/data-managers/offer-manager", OfferManager3);
+    OfferService3 = mock.reRequire(
+      "../../src/commons/services/company/offer-service",
+    );
+  });
+
+  afterEach(() => {
+    sandbox.restore();
+    mock.stopAll();
+  });
+
+  it("resolves a company name to companyIds and passes them to searchOnline", async () => {
+    CompanyManager.getCompanyIdsByName.resolves(["c1", "c2"]);
+    await OfferService3.searchPublicOffers("kg", { company: "nord" });
+    expect(
+      CompanyManager.getCompanyIdsByName.calledWith("kg", "nord"),
+    ).to.equal(true);
+    expect(
+      OfferManager3.searchOnline.firstCall.args[1].companyIds,
+    ).to.deep.equal(["c1", "c2"]);
+  });
+
+  it("returns [] when no company matches the name", async () => {
+    CompanyManager.getCompanyIdsByName.resolves([]);
+    const res = await OfferService3.searchPublicOffers("kg", {
+      company: "zzz",
+    });
+    expect(res).to.deep.equal([]);
+    expect(OfferManager3.searchOnline.called).to.equal(false);
+  });
+
+  it("does not resolve companyIds when no company name is given", async () => {
+    await OfferService3.searchPublicOffers("kg", { industryId: "industry-it" });
+    expect(CompanyManager.getCompanyIdsByName.called).to.equal(false);
+    expect(OfferManager3.searchOnline.firstCall.args[1].companyIds).to.equal(
+      undefined,
+    );
   });
 });

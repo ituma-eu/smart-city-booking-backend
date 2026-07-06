@@ -14,6 +14,7 @@ const memberInvitationSchemaDefinition = {
     default: "pending",
   },
   invitedBy: { type: String, default: "" },
+  expiresAt: { type: Number, default: 0 },
   created: { type: Number, default: () => Date.now() },
 };
 

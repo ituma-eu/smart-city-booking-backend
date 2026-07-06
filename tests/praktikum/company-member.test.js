@@ -17,7 +17,9 @@ describe("CompanyService — members & invitations", () => {
   beforeEach(() => {
     sandbox = sinon.createSandbox();
     CompanyManager = {
-      getCompany: sandbox.stub().resolves({ id: "c1", name: "Muster GmbH" }),
+      getCompany: sandbox
+        .stub()
+        .resolves({ id: "c1", name: "Muster GmbH", status: "verified" }),
     };
     CompanyMemberManager = {
       getMemberByUser: sandbox.stub().resolves(null),
@@ -122,6 +124,24 @@ describe("CompanyService — members & invitations", () => {
       );
     });
 
+    it("rejects (403) inviting from a blocked company", async () => {
+      CompanyManager.getCompany.resolves({
+        id: "c1",
+        name: "Muster GmbH",
+        status: "blocked",
+      });
+      await expectStatus(
+        () =>
+          CompanyService.inviteMember(
+            "kielregion",
+            "c1",
+            "owner",
+            invitePayload(),
+          ),
+        403,
+      );
+    });
+
     it("rejects missing required fields (400)", async () => {
       await expectStatus(
         () =>
@@ -170,6 +190,20 @@ describe("CompanyService — members & invitations", () => {
             invitePayload({ branchId: "ghost" }),
           ),
         400,
+      );
+    });
+
+    it("rejects (409) an email that already has an account", async () => {
+      UserManager.getUserBy.resolves({ id: "x@y.de" });
+      await expectStatus(
+        () =>
+          CompanyService.inviteMember(
+            "kielregion",
+            "c1",
+            "owner",
+            invitePayload(),
+          ),
+        409,
       );
     });
 
@@ -569,40 +603,87 @@ describe("CompanyService — members & invitations", () => {
       });
     });
 
-    it("for an existing user: links without creating a user or changing the password", async () => {
+    it("rejects (403) accepting into a blocked company", async () => {
       MemberInvitationManager.getByToken.resolves(pendingInvite());
-      UserManager.getUserBy.resolves({ id: "neu@team.de", secret: "existing" });
-      await CompanyService.acceptMemberInvitation(
-        "kielregion",
-        "tok",
-        "secret123",
+      CompanyManager.getCompany.resolves({
+        id: "c1",
+        name: "Muster GmbH",
+        status: "blocked",
+      });
+      await expectStatus(
+        () =>
+          CompanyService.acceptMemberInvitation(
+            "kielregion",
+            "tok",
+            "secret123",
+          ),
+        403,
       );
       expect(UserManager.createUser.called).to.equal(false);
-      expect(CompanyMemberManager.storeMember.calledOnce).to.equal(true);
-      expect(MembershipManager.updateMembership.called).to.equal(false); // no existing membership stub → addMembership path
-      expect(MembershipManager.addMembership.calledOnce).to.equal(true);
     });
 
-    it("activates an existing membership instead of adding a new one", async () => {
+    it("creates a PENDING membership without a role for an unverified company", async () => {
       MemberInvitationManager.getByToken.resolves(pendingInvite());
-      UserManager.getUserBy.resolves({ id: "neu@team.de", secret: "existing" });
-      MembershipManager.getMembershipByTenantAndUserID.resolves({
-        userId: "neu@team.de",
-        status: "pending",
+      UserManager.getUserBy.resolves(null);
+      CompanyManager.getCompany.resolves({
+        id: "c1",
+        name: "Muster GmbH",
+        status: "unverified",
       });
       await CompanyService.acceptMemberInvitation(
         "kielregion",
         "tok",
         "secret123",
       );
-      expect(
-        MembershipManager.updateMembership.calledWith(
-          "kielregion",
-          "neu@team.de",
-          { status: "active" },
-        ),
-      ).to.equal(true);
-      expect(MembershipManager.addMembership.called).to.equal(false);
+      const membership = MembershipManager.addMembership.firstCall.args[1];
+      expect(membership.status).to.equal("pending");
+      expect(MembershipManager.addRoleToMembership.called).to.equal(false);
+    });
+
+    it("rejects (409) an existing account and does not link or create anything", async () => {
+      MemberInvitationManager.getByToken.resolves(pendingInvite());
+      UserManager.getUserBy.resolves({ id: "neu@team.de", secret: "existing" });
+      await expectStatus(
+        () =>
+          CompanyService.acceptMemberInvitation(
+            "kielregion",
+            "tok",
+            "secret123",
+          ),
+        409,
+      );
+      expect(UserManager.createUser.called).to.equal(false);
+      expect(CompanyMemberManager.storeMember.called).to.equal(false);
+    });
+
+    it("rejects (410) an expired invitation", async () => {
+      MemberInvitationManager.getByToken.resolves({
+        ...pendingInvite(),
+        expiresAt: Date.now() - 1000,
+      });
+      await expectStatus(
+        () =>
+          CompanyService.acceptMemberInvitation(
+            "kielregion",
+            "tok",
+            "secret123",
+          ),
+        410,
+      );
+    });
+
+    it("rejects (400) a password without a digit", async () => {
+      MemberInvitationManager.getByToken.resolves(pendingInvite());
+      UserManager.getUserBy.resolves(null);
+      await expectStatus(
+        () =>
+          CompanyService.acceptMemberInvitation(
+            "kielregion",
+            "tok",
+            "onlyletters",
+          ),
+        400,
+      );
     });
 
     it("rejects (409) if the invitee already belongs to a company (no duplicate row)", async () => {

@@ -1,5 +1,6 @@
 const Company = require("../entities/company/company");
 const CompanyModel = require("./models/companyModel");
+const { escapeRegex } = require("../utilities/regexUtils");
 
 class CompanyManager {
   static async getCompanies(tenantId, filter = {}) {
@@ -13,6 +14,14 @@ class CompanyManager {
       return null;
     }
     return rawCompany.toEntity();
+  }
+
+  static async getCompanyIdsByName(tenantId, name) {
+    const raw = await CompanyModel.find(
+      { tenantId, name: { $regex: escapeRegex(name), $options: "i" } },
+      { id: 1, _id: 0 },
+    );
+    return raw.map((doc) => doc.id);
   }
 
   static async storeCompany(company, upsert = true) {
@@ -32,6 +41,10 @@ class CompanyManager {
 
   static async setLogo(tenantId, id, logoUrl) {
     await CompanyModel.updateOne({ tenantId, id }, { $set: { logoUrl } });
+  }
+
+  static async deleteCompany(tenantId, id) {
+    await CompanyModel.deleteOne({ tenantId, id });
   }
 }
 
