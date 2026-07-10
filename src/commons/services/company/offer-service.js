@@ -17,6 +17,7 @@ const CONTACT_CHANNELS = [
   "Externes Bewerbermanagementsystem",
 ];
 const EXTERNAL_CHANNEL = "Externes Bewerbermanagementsystem";
+const MAX_MEDIA_ITEMS = 12;
 
 async function assertTaxonomyRef(tenantId, id, type, label) {
   if (!id) {
@@ -33,12 +34,15 @@ function normalizeContactPersons(list) {
     return [];
   }
   return list
-    .map((person) => ({
-      firstName: String(person.firstName || "").trim(),
-      lastName: String(person.lastName || "").trim(),
-      email: String(person.email || "").trim(),
-      phone: String(person.phone || "").trim(),
-    }))
+    .map((entry) => {
+      const person = entry && typeof entry === "object" ? entry : {};
+      return {
+        firstName: String(person.firstName || "").trim(),
+        lastName: String(person.lastName || "").trim(),
+        email: String(person.email || "").trim(),
+        phone: String(person.phone || "").trim(),
+      };
+    })
     .filter((person) => person.firstName || person.lastName || person.email);
 }
 
@@ -82,6 +86,12 @@ function toOfferDto(offer) {
 function toPublicOfferDto(offer) {
   const dto = toOfferDto(offer);
   delete dto.reviewNote;
+  return dto;
+}
+
+function toSearchOfferDto(offer) {
+  const dto = toPublicOfferDto(offer);
+  delete dto.contactPersons;
   return dto;
 }
 
@@ -327,9 +337,13 @@ class OfferService {
     return toOfferDto(offer);
   }
 
-  static async getCompanyOffers(tenantId, companyId) {
+  static async getCompanyOffers(tenantId, companyId, branchScope = null) {
     const offers = await OfferManager.getOffersByCompany(tenantId, companyId);
-    return offers.map(toOfferDto);
+    const scoped =
+      branchScope === null || branchScope === undefined
+        ? offers
+        : offers.filter((o) => (o.branchId || "") === branchScope);
+    return scoped.map(toOfferDto);
   }
 
   static async getCompanyOffer(tenantId, companyId, offerId) {
@@ -423,13 +437,19 @@ class OfferService {
       }
       resolved.companyIds = companyIds;
     }
+    resolved.excludeCompanyIds =
+      await CompanyManager.getBlockedCompanyIds(tenantId);
     const offers = await OfferManager.searchOnline(tenantId, resolved);
-    return offers.map(toPublicOfferDto);
+    return offers.map(toSearchOfferDto);
   }
 
   static async getPublicOffer(tenantId, offerId) {
     const offer = await OfferManager.getOffer(tenantId, offerId);
     if (!offer || offer.status !== "Online") {
+      throw { message: "Offer not found", status: 404 };
+    }
+    const company = await CompanyManager.getCompany(tenantId, offer.companyId);
+    if (!company || company.status === "blocked") {
       throw { message: "Offer not found", status: 404 };
     }
     await OfferManager.incrementViews(tenantId, offerId);
@@ -510,6 +530,13 @@ class OfferService {
   }
 
   static async addOfferMedia(tenantId, offerId, { url, fileName, type }) {
+    const existing = await OfferMediaManager.getMediaByOffer(tenantId, offerId);
+    if (existing.length >= MAX_MEDIA_ITEMS) {
+      throw {
+        message: `An offer can have at most ${MAX_MEDIA_ITEMS} media items`,
+        status: 409,
+      };
+    }
     const media = await OfferMediaManager.storeMedia({
       id: uuidv4(),
       tenantId,

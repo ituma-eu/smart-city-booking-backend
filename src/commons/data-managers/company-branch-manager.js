@@ -21,9 +21,11 @@ class CompanyBranchManager {
     const branchEntity =
       branch instanceof CompanyBranch ? branch : new CompanyBranch(branch);
     branchEntity.validate();
-    await CompanyBranchModel.updateOne({ id: branchEntity.id }, branchEntity, {
-      upsert,
-    });
+    await CompanyBranchModel.updateOne(
+      { id: branchEntity.id, tenantId: branchEntity.tenantId },
+      { ...branchEntity },
+      { upsert, runValidators: true },
+    );
     return branchEntity;
   }
 

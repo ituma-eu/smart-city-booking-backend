@@ -70,6 +70,9 @@ describe("StudentService — profile (get/update)", () => {
       grade: "9",
       targetGroups: ["pupil"],
     });
+    expect(UserManager.getUserBy.calledWith({ id: userId }, false)).to.equal(
+      true,
+    );
   });
 
   it("getStudentProfile returns an empty extension when no student row exists", async () => {
@@ -82,7 +85,7 @@ describe("StudentService — profile (get/update)", () => {
   });
 
   it("getStudentProfile → 404 when the user does not exist", async () => {
-    UserManager.getUser.callsFake(async () => null);
+    UserManager.getUserBy.callsFake(async () => null);
     let err;
     try {
       await StudentService.getStudentProfile(userId);
@@ -168,7 +171,7 @@ describe("StudentService — profile (get/update)", () => {
     expect(UserManager.updateUser.called).to.equal(false);
   });
 
-  it("updateStudentProfile → 403 when the caller has no student profile", async () => {
+  it("updateStudentProfile → 404 when the caller has no student profile", async () => {
     StudentManager.getStudentByUser.callsFake(async () => null);
     let err;
     try {
@@ -185,7 +188,7 @@ describe("StudentService — profile (get/update)", () => {
     } catch (e) {
       err = e;
     }
-    expect(err && err.status).to.equal(403);
+    expect(err && err.status).to.equal(404);
     expect(UserManager.updateUser.called).to.equal(false);
   });
 

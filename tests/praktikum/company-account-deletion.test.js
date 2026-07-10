@@ -14,9 +14,10 @@ describe("ApplicationService — deleteByOffer / deleteByCompany", () => {
       getByOffer: sandbox.stub().resolves([]),
       getByCompany: sandbox.stub().resolves([]),
       listByUser: sandbox.stub().resolves([]),
+      getAllByStudent: sandbox.stub().resolves([]),
       removeByOffer: sandbox.stub().resolves(),
       removeByCompany: sandbox.stub().resolves(),
-      removeByStudent: sandbox.stub().resolves(),
+      removeByStudentAllTenants: sandbox.stub().resolves(),
     };
     NextcloudManager = { deleteFile: sandbox.stub().resolves() };
     mock(
@@ -81,24 +82,28 @@ describe("ApplicationService — deleteByOffer / deleteByCompany", () => {
     expect(res).to.deep.equal({ removed: 1 });
   });
 
-  it("deleteByStudent deletes document files, then the records", async () => {
-    ApplicationManager.listByUser.resolves([
-      { id: "a1", documents: [{ fileName: "protected/f1" }] },
+  it("deleteByStudent deletes documents across ALL tenants, then the records", async () => {
+    ApplicationManager.getAllByStudent.resolves([
+      { id: "a1", tenantId: "kg", documents: [{ fileName: "f1" }] },
+      { id: "a2", tenantId: "other", documents: [{ fileName: "f2" }] },
     ]);
-    const res = await ApplicationService.deleteByStudent("kg", "lena@x.de");
+    const res = await ApplicationService.deleteByStudent("lena@x.de");
+    expect(NextcloudManager.deleteFile.calledWith("kg", "f1")).to.equal(true);
+    expect(NextcloudManager.deleteFile.calledWith("other", "f2")).to.equal(
+      true,
+    );
     expect(
-      NextcloudManager.deleteFile.calledWith("kg", "protected/f1"),
+      ApplicationManager.removeByStudentAllTenants.calledWith("lena@x.de"),
     ).to.equal(true);
-    expect(
-      ApplicationManager.removeByStudent.calledWith("kg", "lena@x.de"),
-    ).to.equal(true);
-    expect(res).to.deep.equal({ removed: 1 });
+    expect(res).to.deep.equal({ removed: 2 });
   });
 });
 
 describe("CompanyService — deleteOwnerAccount", () => {
   let sandbox;
   let CompanyManager;
+  let CompanyMediaManager;
+  let NextcloudManager;
   let CompanyMemberManager;
   let CompanyBranchManager;
   let MemberInvitationManager;
@@ -120,6 +125,11 @@ describe("CompanyService — deleteOwnerAccount", () => {
       getCompany: sandbox.stub().resolves({ id: CO, name: "Muster GmbH" }),
       deleteCompany: sandbox.stub().resolves(),
     };
+    CompanyMediaManager = {
+      getMediaByCompany: sandbox.stub().resolves([]),
+      removeMedia: sandbox.stub().resolves(),
+    };
+    NextcloudManager = { deleteFile: sandbox.stub().resolves() };
     CompanyMemberManager = {
       getMemberByUser: sandbox
         .stub()
@@ -153,6 +163,11 @@ describe("CompanyService — deleteOwnerAccount", () => {
     JwtHelper = { revokeAllUserTokens: sandbox.stub().resolves() };
 
     mock("../../src/commons/data-managers/company-manager", CompanyManager);
+    mock(
+      "../../src/commons/data-managers/company-media-manager",
+      CompanyMediaManager,
+    );
+    mock("../../src/commons/data-managers/file-manager", { NextcloudManager });
     mock(
       "../../src/commons/data-managers/company-member-manager",
       CompanyMemberManager,
@@ -328,5 +343,27 @@ describe("CompanyService — deleteOwnerAccount", () => {
     MembershipManager.getMembershipsByUserID.resolves([{ tenantId: "other" }]);
     await run();
     expect(UserManager.deleteUser.called).to.equal(false);
+  });
+
+  it("deletes company media files + rows and the logo file on teardown", async () => {
+    CompanyManager.getCompany.resolves({
+      id: CO,
+      name: "Muster GmbH",
+      logoUrl: "http://x/api/kg/files/get?name=/public/logos/logo.png",
+    });
+    CompanyMediaManager.getMediaByCompany.resolves([
+      { id: "m1", fileName: "public/media/a.jpg" },
+      { id: "m2", fileName: "public/media/b.jpg" },
+    ]);
+    await run();
+    expect(
+      NextcloudManager.deleteFile.calledWith("kg", "public/media/a.jpg"),
+    ).to.equal(true);
+    expect(CompanyMediaManager.removeMedia.calledWith("kg", "m1")).to.equal(
+      true,
+    );
+    expect(
+      NextcloudManager.deleteFile.calledWith("kg", "/public/logos/logo.png"),
+    ).to.equal(true);
   });
 });

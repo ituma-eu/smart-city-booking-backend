@@ -1,6 +1,5 @@
 const bunyan = require("bunyan");
-const PermissionService = require("../../../commons/services/permission-service");
-const { RolePermission } = require("../../../commons/entities/role/role");
+const CompanyController = require("./company-controller");
 const PlatformSettingsService = require("../../../commons/services/platform-settings-service");
 const platformSettingsSchema = require("../../../commons/schemas/platformSettingsSchema");
 
@@ -12,14 +11,6 @@ const logger = bunyan.createLogger({
 });
 
 class SettingsController {
-  static async isTenantAdmin(userId, tenantId) {
-    return PermissionService._allowUpdateAny(
-      userId,
-      tenantId,
-      RolePermission.MANAGE_USERS,
-    );
-  }
-
   static async getSettings(request, response) {
     try {
       const tenantId = request.params.tenant;
@@ -54,9 +45,7 @@ class SettingsController {
   static async updateSettings(request, response) {
     try {
       const tenantId = request.params.tenant;
-      if (
-        !(await SettingsController.isTenantAdmin(request.user.id, tenantId))
-      ) {
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
         return response.sendStatus(403);
       }
       const settings = await PlatformSettingsService.updateSettings(

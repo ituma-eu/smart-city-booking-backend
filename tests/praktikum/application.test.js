@@ -38,7 +38,7 @@ describe("ApplicationService — submitApplication", () => {
       getOffersByIds: sandbox.stub().resolves([]),
     };
     UserManager = {
-      getUser: sandbox.stub().resolves({
+      getUserBy: sandbox.stub().resolves({
         id: userId,
         firstName: "Lena",
         lastName: "Petersen",
@@ -57,6 +57,10 @@ describe("ApplicationService — submitApplication", () => {
       "../../src/commons/data-managers/application-manager",
       ApplicationManager,
     );
+    mock("../../src/commons/data-managers/company-manager", {
+      getCompany: sandbox.stub().resolves({ id: "c-1", status: "verified" }),
+      getBlockedCompanyIds: sandbox.stub().resolves([]),
+    });
     PlatformSettingsService = {
       getSettings: sandbox.stub().resolves({ defaultApplicationStatus: "Neu" }),
     };
@@ -276,6 +280,9 @@ describe("ApplicationService — listMyApplications", () => {
     );
     mock("../../src/commons/data-managers/student-manager", {});
     mock("../../src/commons/data-managers/user-manager", {});
+    mock("../../src/commons/data-managers/company-manager", {
+      getBlockedCompanyIds: sandbox.stub().resolves([]),
+    });
     ApplicationService = mock.reRequire(
       "../../src/commons/services/student/application-service",
     );

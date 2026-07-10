@@ -88,7 +88,7 @@ describe("PlatformSettingsService", () => {
         err = e;
       }
       expect(err).to.not.equal(undefined);
-      expect(err.statusCode).to.equal(400);
+      expect(err.status).to.equal(400);
     });
 
     it("coerces directPublishVerified to a boolean", async () => {
@@ -122,7 +122,7 @@ describe("PlatformSettingsService", () => {
 
 describe("SettingsController", () => {
   let sandbox;
-  let PermissionService;
+  let CompanyController;
   let PlatformSettingsService;
   let SettingsController;
 
@@ -145,14 +145,17 @@ describe("SettingsController", () => {
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
-    PermissionService = { _allowUpdateAny: sandbox.stub().resolves(false) };
+    CompanyController = { isTenantAdmin: sandbox.stub().resolves(false) };
     PlatformSettingsService = {
       getSettings: sandbox.stub().resolves({ tenantId: "kielregion" }),
       updateSettings: sandbox
         .stub()
         .resolves({ tenantId: "kielregion", directPublishVerified: true }),
     };
-    mock("../../src/commons/services/permission-service", PermissionService);
+    mock(
+      "../../src/platform/api/controllers/company-controller",
+      CompanyController,
+    );
     mock(
       "../../src/commons/services/platform-settings-service",
       PlatformSettingsService,
@@ -174,7 +177,7 @@ describe("SettingsController", () => {
       r,
     );
     expect(r.statusCode).to.equal(200);
-    expect(PermissionService._allowUpdateAny.called).to.equal(false);
+    expect(CompanyController.isTenantAdmin.called).to.equal(false);
   });
 
   it("getSettings ?key=<field> returns only that key", async () => {
@@ -234,7 +237,7 @@ describe("SettingsController", () => {
   });
 
   it("updateSettings -> 200 for an admin", async () => {
-    PermissionService._allowUpdateAny.resolves(true);
+    CompanyController.isTenantAdmin.resolves(true);
     const r = res();
     await SettingsController.updateSettings(
       {

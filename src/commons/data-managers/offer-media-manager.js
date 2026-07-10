@@ -23,9 +23,9 @@ class OfferMediaManager {
     mediaEntity.validate();
     // pass a copy: Mongoose mutates the update object with $setOnInsert on upsert
     await OfferMediaModel.updateOne(
-      { id: mediaEntity.id },
+      { id: mediaEntity.id, tenantId: mediaEntity.tenantId },
       { ...mediaEntity },
-      { upsert },
+      { upsert, runValidators: true },
     );
     return mediaEntity;
   }

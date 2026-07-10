@@ -40,10 +40,13 @@ describe("OfferController", () => {
       isMemberOrAdmin: sandbox.stub().resolves(true),
       canEditBranch: sandbox.stub().resolves(true),
       isTenantAdmin: sandbox.stub().resolves(true),
+      getBranchAccess: sandbox.stub().resolves({ isAdmin: true, member: null }),
+      _memberBranchScope: sandbox.stub().returns(null),
     };
     OfferService = {
       getCompanyOffers: sandbox.stub().resolves([]),
       getCompanyOffer: sandbox.stub().resolves({ id: "o1" }),
+      getCompanyStats: sandbox.stub().resolves({}),
       createOffer: sandbox.stub().resolves({ id: "o1" }),
       updateOffer: sandbox.stub().resolves({ id: "o1" }),
       deleteOffer: sandbox.stub().resolves({ removed: "o1" }),
@@ -89,7 +92,10 @@ describe("OfferController", () => {
 
   describe("authorization", () => {
     it("listOffers -> 403 for a non-member/non-admin", async () => {
-      CompanyController.isMemberOrAdmin.resolves(false);
+      CompanyController.getBranchAccess.resolves({
+        isAdmin: false,
+        member: null,
+      });
       const r = res();
       await OfferController.listOffers(req(), r);
       expect(r.statusCode).to.equal(403);
@@ -100,6 +106,62 @@ describe("OfferController", () => {
       const r = res();
       await OfferController.listOffers(req(), r);
       expect(r.statusCode).to.equal(200);
+    });
+
+    it("listOffers -> a branch-scoped member only sees their branch", async () => {
+      CompanyController.getBranchAccess.resolves({
+        isAdmin: false,
+        member: { branchId: "b1" },
+      });
+      CompanyController._memberBranchScope.returns("b1");
+      const r = res();
+      await OfferController.listOffers(req(), r);
+      expect(r.statusCode).to.equal(200);
+      expect(
+        OfferService.getCompanyOffers.calledWith("kg", "c1", "b1"),
+      ).to.equal(true);
+    });
+
+    it("getOffer -> 404 for a branch-scoped member reading another branch's offer", async () => {
+      CompanyController.getBranchAccess.resolves({
+        isAdmin: false,
+        member: { branchId: "b1" },
+      });
+      CompanyController._memberBranchScope.returns("b1");
+      OfferService.getCompanyOffer.resolves({ id: "o1", branchId: "b2" });
+      const r = res();
+      await OfferController.getOffer(req(), r);
+      expect(r.statusCode).to.equal(404);
+    });
+
+    it("getStats -> a branch-scoped member's stats are forced to their branch", async () => {
+      CompanyController.getBranchAccess.resolves({
+        isAdmin: false,
+        member: { branchId: "b1" },
+      });
+      CompanyController._memberBranchScope.returns("b1");
+      const r = res();
+      await OfferController.getStats(req({ query: { branchId: "b2" } }), r);
+      expect(r.statusCode).to.equal(200);
+      expect(OfferService.getCompanyStats.firstCall.args[2].branchId).to.equal(
+        "b1",
+      );
+    });
+
+    it("listMedia -> 404 for a branch-scoped member reading another branch's offer", async () => {
+      CompanyController.getBranchAccess.resolves({
+        isAdmin: false,
+        member: { branchId: "b1" },
+      });
+      CompanyController._memberBranchScope.returns("b1");
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        branchId: "b2",
+      });
+      const r = res();
+      await OfferController.listMedia(req(), r);
+      expect(r.statusCode).to.equal(404);
     });
 
     it("createOffer -> 403 without branch edit rights", async () => {

@@ -16,11 +16,8 @@ class StudentManager {
     studentEntity.validate();
     await StudentModel.updateOne(
       { userId: studentEntity.userId },
-      studentEntity,
-      {
-        upsert,
-        setDefaultsOnInsert: true,
-      },
+      { ...studentEntity },
+      { upsert, setDefaultsOnInsert: true, runValidators: true },
     );
     return studentEntity;
   }

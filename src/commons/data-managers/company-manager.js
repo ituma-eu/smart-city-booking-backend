@@ -24,14 +24,23 @@ class CompanyManager {
     return raw.map((doc) => doc.id);
   }
 
+  static async getBlockedCompanyIds(tenantId) {
+    const raw = await CompanyModel.find(
+      { tenantId, status: "blocked" },
+      { id: 1, _id: 0 },
+    );
+    return raw.map((doc) => doc.id);
+  }
+
   static async storeCompany(company, upsert = true) {
     const companyEntity =
       company instanceof Company ? company : new Company(company);
     companyEntity.validate();
-    await CompanyModel.updateOne({ id: companyEntity.id }, companyEntity, {
-      upsert,
-      setDefaultsOnInsert: true,
-    });
+    await CompanyModel.updateOne(
+      { id: companyEntity.id, tenantId: companyEntity.tenantId },
+      { ...companyEntity },
+      { upsert, setDefaultsOnInsert: true, runValidators: true },
+    );
     return companyEntity;
   }
 

@@ -3,6 +3,13 @@ const { v4: uuidv4 } = require("uuid");
 const PostService = require("../../../commons/services/post-service");
 const CompanyController = require("./company-controller");
 const CompanyMemberManager = require("../../../commons/data-managers/company-member-manager");
+const { sendError } = require("../../../commons/utilities/http-error");
+const { deleteFileByUrl } = require("../../../commons/utilities/file-url");
+const {
+  MAX_IMAGE_BYTES,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENTS,
+} = require("../../../commons/utilities/upload-limits");
 const {
   NextcloudManager,
 } = require("../../../commons/data-managers/file-manager");
@@ -12,9 +19,6 @@ const logger = bunyan.createLogger({
   level: process.env.LOG_LEVEL,
 });
 
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-const MAX_ATTACHMENTS = 10;
 const POST_MEDIA_DIR = "public/post-media";
 
 class PostController {
@@ -31,9 +35,7 @@ class PostController {
       return response.status(200).send(result);
     } catch (error) {
       logger.error("Could not list posts", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not list posts");
+      return sendError(response, error, "Could not list posts");
     }
   }
 
@@ -45,9 +47,7 @@ class PostController {
       );
       return response.status(200).send(result);
     } catch (error) {
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not load post");
+      return sendError(response, error, "Could not load post");
     }
   }
 
@@ -57,9 +57,7 @@ class PostController {
       return response.status(200).send(result);
     } catch (error) {
       logger.error("Could not list post tags", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not list post tags");
+      return sendError(response, error, "Could not list post tags");
     }
   }
 
@@ -74,9 +72,7 @@ class PostController {
       return response.status(200).send(result);
     } catch (error) {
       logger.error("Could not list posts (admin)", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not list posts");
+      return sendError(response, error, "Could not list posts");
     }
   }
 
@@ -90,9 +86,7 @@ class PostController {
       return response.status(201).send(result);
     } catch (error) {
       logger.error("Could not create post", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not create post");
+      return sendError(response, error, "Could not create post");
     }
   }
 
@@ -110,9 +104,7 @@ class PostController {
       return response.status(200).send(result);
     } catch (error) {
       logger.error("Could not update post", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not update post");
+      return sendError(response, error, "Could not update post");
     }
   }
 
@@ -130,9 +122,7 @@ class PostController {
       return response.status(200).send(result);
     } catch (error) {
       logger.error("Could not publish post", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not publish post");
+      return sendError(response, error, "Could not publish post");
     }
   }
 
@@ -150,9 +140,7 @@ class PostController {
       return response.status(200).send(result);
     } catch (error) {
       logger.error("Could not unpublish post", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not unpublish post");
+      return sendError(response, error, "Could not unpublish post");
     }
   }
 
@@ -166,9 +154,7 @@ class PostController {
       return response.status(200).send(result);
     } catch (error) {
       logger.error("Could not delete post", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not delete post");
+      return sendError(response, error, "Could not delete post");
     }
   }
 
@@ -188,9 +174,7 @@ class PostController {
       return response.status(200).send(result);
     } catch (error) {
       logger.error("Could not list company posts", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not list company posts");
+      return sendError(response, error, "Could not list company posts");
     }
   }
 
@@ -220,7 +204,6 @@ class PostController {
         tenantId,
         request.params.id,
       );
-      await PostController._deletePostFile(tenantId, existing.thumbnailUrl);
       const url = await PostController._storeFile(
         tenantId,
         request.params.id,
@@ -231,12 +214,13 @@ class PostController {
         request.params.id,
         url,
       );
+      if (existing.thumbnailUrl && existing.thumbnailUrl !== url) {
+        await PostController._deletePostFile(tenantId, existing.thumbnailUrl);
+      }
       return response.status(200).send(post);
     } catch (error) {
       logger.error("Could not upload post thumbnail", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not upload thumbnail");
+      return sendError(response, error, "Could not upload thumbnail");
     }
   }
 
@@ -259,9 +243,7 @@ class PostController {
       return response.status(200).send(post);
     } catch (error) {
       logger.error("Could not remove post thumbnail", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not remove thumbnail");
+      return sendError(response, error, "Could not remove thumbnail");
     }
   }
 
@@ -319,9 +301,7 @@ class PostController {
       return response.status(201).send(post);
     } catch (error) {
       logger.error("Could not upload post attachment", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not upload attachment");
+      return sendError(response, error, "Could not upload attachment");
     }
   }
 
@@ -340,9 +320,7 @@ class PostController {
       return response.status(200).send(post);
     } catch (error) {
       logger.error("Could not remove post attachment", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not remove attachment");
+      return sendError(response, error, "Could not remove attachment");
     }
   }
 
@@ -360,23 +338,7 @@ class PostController {
   }
 
   static async _deletePostFile(tenantId, url) {
-    if (!url) {
-      return;
-    }
-    let path = null;
-    try {
-      path = new URL(url).searchParams.get("name");
-    } catch {
-      return;
-    }
-    if (!path) {
-      return;
-    }
-    try {
-      await NextcloudManager.deleteFile(tenantId, path);
-    } catch (e) {
-      logger.warn(`Could not delete post file: ${e.message}`);
-    }
+    await deleteFileByUrl(tenantId, url);
   }
 }
 

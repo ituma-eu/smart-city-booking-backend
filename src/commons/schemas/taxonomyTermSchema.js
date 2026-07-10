@@ -1,5 +1,5 @@
 const taxonomyTermSchemaDefinition = {
-  id: { type: String, required: true, unique: true },
+  id: { type: String, required: true },
   tenantId: { type: String, required: true },
   type: {
     type: String,
@@ -8,7 +8,7 @@ const taxonomyTermSchemaDefinition = {
       "internship_type",
       "district",
       "company_size",
-      "post_tag",
+      "application_status",
       "deletion_reason_student",
       "deletion_reason_company",
     ],

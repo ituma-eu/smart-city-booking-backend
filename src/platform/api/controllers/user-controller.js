@@ -4,6 +4,7 @@ const bunyan = require("bunyan");
 const PermissionService = require("../../../commons/services/permission-service");
 const UserService = require("../../../commons/services/user-service");
 const MembershipManager = require("../../../commons/data-managers/membership-manager");
+const JwtHelper = require("../../../commons/utilities/jwt-helper");
 
 const logger = bunyan.createLogger({
   name: "user-controller.js",
@@ -444,6 +445,7 @@ class UserController {
       }
       user.setPassword(newPassword);
       await UserManager.updateUser(user);
+      await JwtHelper.revokeAllUserTokens(request.user.id, "password_changed");
       return response.sendStatus(200);
     } catch (error) {
       logger.error(error);

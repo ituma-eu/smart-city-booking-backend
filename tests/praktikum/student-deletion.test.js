@@ -97,9 +97,9 @@ describe("StudentService — deleteAccount", () => {
       ),
     ).to.equal(true);
     expect(OfferBookmarkManager.removeByUser.calledWith(userId)).to.equal(true);
-    expect(
-      ApplicationService.deleteByStudent.calledWith("kielregion", userId),
-    ).to.equal(true);
+    expect(ApplicationService.deleteByStudent.calledWith(userId)).to.equal(
+      true,
+    );
     expect(StudentManager.removeStudent.calledWith(userId)).to.equal(true);
     expect(
       MembershipManager.removeMembership.calledWith("kielregion", userId),
@@ -115,9 +115,9 @@ describe("StudentService — deleteAccount", () => {
     ]);
     await StudentService.deleteAccount("kielregion", userId, reason);
     expect(OfferBookmarkManager.removeByUser.calledWith(userId)).to.equal(true);
-    expect(
-      ApplicationService.deleteByStudent.calledWith("kielregion", userId),
-    ).to.equal(true);
+    expect(ApplicationService.deleteByStudent.calledWith(userId)).to.equal(
+      true,
+    );
     expect(StudentManager.removeStudent.calledWith(userId)).to.equal(true);
     expect(UserManager.deleteUser.called).to.equal(false);
   });

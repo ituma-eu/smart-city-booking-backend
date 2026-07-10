@@ -1,6 +1,7 @@
 const bunyan = require("bunyan");
 const StudentService = require("../../../commons/services/student/student-service");
 const OfferBookmarkService = require("../../../commons/services/student/offer-bookmark-service");
+const { sendError } = require("../../../commons/utilities/http-error");
 
 const logger = bunyan.createLogger({
   name: "student-controller.js",
@@ -18,9 +19,7 @@ class StudentController {
       return response.status(201).send({ id: result.id });
     } catch (error) {
       logger.error("Could not register student", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not register student");
+      return sendError(response, error, "Could not register student");
     }
   }
 
@@ -38,9 +37,7 @@ class StudentController {
       });
     } catch (error) {
       logger.error("Could not resend student verification", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not resend verification");
+      return sendError(response, error, "Could not resend verification");
     }
   }
 
@@ -50,9 +47,7 @@ class StudentController {
       return response.status(200).send(profile);
     } catch (error) {
       logger.error("Could not load student profile", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not load student profile");
+      return sendError(response, error, "Could not load student profile");
     }
   }
 
@@ -65,9 +60,7 @@ class StudentController {
       return response.status(200).send(profile);
     } catch (error) {
       logger.error("Could not update student profile", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not update student profile");
+      return sendError(response, error, "Could not update student profile");
     }
   }
 
@@ -80,9 +73,7 @@ class StudentController {
       return response.status(200).send(bookmarks);
     } catch (error) {
       logger.error("Could not load bookmarks", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not load bookmarks");
+      return sendError(response, error, "Could not load bookmarks");
     }
   }
 
@@ -96,9 +87,7 @@ class StudentController {
       return response.status(201).send(result);
     } catch (error) {
       logger.error("Could not add bookmark", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not add bookmark");
+      return sendError(response, error, "Could not add bookmark");
     }
   }
 
@@ -112,9 +101,7 @@ class StudentController {
       return response.status(200).send(result);
     } catch (error) {
       logger.error("Could not remove bookmark", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not remove bookmark");
+      return sendError(response, error, "Could not remove bookmark");
     }
   }
 
@@ -128,9 +115,7 @@ class StudentController {
       return response.status(200).send(result);
     } catch (error) {
       logger.error("Could not delete student account", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not delete student account");
+      return sendError(response, error, "Could not delete student account");
     }
   }
 }

@@ -50,9 +50,11 @@ class MemberInvitationManager {
         ? invitation
         : new MemberInvitation(invitation);
     entity.validate();
-    await MemberInvitationModel.updateOne({ id: entity.id }, entity, {
-      upsert,
-    });
+    await MemberInvitationModel.updateOne(
+      { id: entity.id, tenantId: entity.tenantId },
+      { ...entity },
+      { upsert, runValidators: true },
+    );
     return entity;
   }
 

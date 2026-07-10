@@ -205,7 +205,7 @@ class StudentService {
   }
 
   static async getStudentProfile(userId) {
-    const user = await UserManager.getUser(userId, false);
+    const user = await UserManager.getUserBy({ id: userId }, false);
     if (!user) {
       throw { message: "User not found", status: 404 };
     }
@@ -271,7 +271,7 @@ class StudentService {
     }
     const existing = await StudentManager.getStudentByUser(userId);
     if (!existing) {
-      throw { message: "Student profile not found", status: 403 };
+      throw { message: "Student profile not found", status: 404 };
     }
     user.firstName = firstName;
     user.lastName = lastName;
@@ -304,7 +304,7 @@ class StudentService {
       reason,
     );
     await OfferBookmarkManager.removeByUser(userId);
-    await ApplicationService.deleteByStudent(tenantId, userId);
+    await ApplicationService.deleteByStudent(userId);
     await StudentManager.removeStudent(userId);
     // Count only once the student is actually gone; a retry now hits the 404
     // guard above and cannot double-count.

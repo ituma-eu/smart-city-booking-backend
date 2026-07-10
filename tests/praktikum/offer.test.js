@@ -58,6 +58,7 @@ describe("OfferService", () => {
         districtId: "district-kiel",
         location: { type: "Point", coordinates: [9.99, 54.07] },
       }),
+      getBlockedCompanyIds: sandbox.stub().resolves([]),
     };
     CompanyBranchManager = { getBranch: sandbox.stub().resolves(branch()) };
     TaxonomyTermManager = {
@@ -331,6 +332,7 @@ describe("OfferService", () => {
       const list = await OfferService.searchPublicOffers("kg", {});
       expect(list).to.have.length(1);
       expect(list[0]).to.not.have.property("reviewNote");
+      expect(list[0]).to.not.have.property("contactPersons");
       expect(list[0]).to.not.have.property("media");
     });
   });
@@ -644,9 +646,19 @@ describe("OfferManager — searchOnline query building", () => {
     const FakeModel = {
       find(query) {
         captured.query = query;
-        const p = Promise.resolve([]);
-        p.sort = () => Promise.resolve([]);
-        return p;
+        const chain = {
+          sort: () => chain,
+          limit: (n) => {
+            captured.limit = n;
+            return chain;
+          },
+          skip: (n) => {
+            captured.skip = n;
+            return chain;
+          },
+          then: (resolve) => resolve([]),
+        };
+        return chain;
       },
     };
     mock("../../src/commons/data-managers/models/offerModel", FakeModel);
@@ -733,6 +745,18 @@ describe("OfferManager — searchOnline query building", () => {
     });
     expect(captured.query.companyId).to.equal("c1");
   });
+
+  it("applies a default result cap and offset of 0", async () => {
+    await OfferManager2.searchOnline("kg", {});
+    expect(captured.limit).to.equal(50);
+    expect(captured.skip).to.equal(0);
+  });
+
+  it("clamps an oversized limit to the max and applies the offset", async () => {
+    await OfferManager2.searchOnline("kg", { limit: 5000, offset: 20 });
+    expect(captured.limit).to.equal(100);
+    expect(captured.skip).to.equal(20);
+  });
 });
 
 describe("OfferService — searchPublicOffers (company-name resolution)", () => {
@@ -743,7 +767,10 @@ describe("OfferService — searchPublicOffers (company-name resolution)", () => 
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
-    CompanyManager = { getCompanyIdsByName: sandbox.stub().resolves([]) };
+    CompanyManager = {
+      getCompanyIdsByName: sandbox.stub().resolves([]),
+      getBlockedCompanyIds: sandbox.stub().resolves([]),
+    };
     OfferManager3 = { searchOnline: sandbox.stub().resolves([]) };
     mock("../../src/commons/data-managers/company-manager", CompanyManager);
     mock("../../src/commons/data-managers/offer-manager", OfferManager3);

@@ -2,6 +2,9 @@ const Offer = require("../entities/company/offer");
 const OfferModel = require("./models/offerModel");
 const { escapeRegex } = require("../utilities/regexUtils");
 
+const DEFAULT_SEARCH_LIMIT = 50;
+const MAX_SEARCH_LIMIT = 100;
+
 class OfferManager {
   static async getOffersByCompany(tenantId, companyId) {
     const raw = await OfferModel.find({ tenantId, companyId }).sort({
@@ -30,7 +33,11 @@ class OfferManager {
     const entity = offer instanceof Offer ? offer : new Offer(offer);
     entity.validate();
     // pass a copy: Mongoose mutates the update object with $setOnInsert on upsert
-    await OfferModel.updateOne({ id: entity.id }, { ...entity }, { upsert });
+    await OfferModel.updateOne(
+      { id: entity.id, tenantId: entity.tenantId },
+      { ...entity },
+      { upsert, runValidators: true },
+    );
     return entity;
   }
 
@@ -98,6 +105,12 @@ class OfferManager {
         $or: [{ minAge: null }, { minAge: { $lte: filters.minAge } }],
       });
     }
+    if (
+      Array.isArray(filters.excludeCompanyIds) &&
+      filters.excludeCompanyIds.length > 0
+    ) {
+      and.push({ companyId: { $nin: filters.excludeCompanyIds } });
+    }
     if (and.length > 0) {
       query.$and = and;
     }
@@ -108,6 +121,12 @@ class OfferManager {
       filters.lng !== undefined &&
       filters.lng !== null &&
       filters.radiusMeters;
+
+    const limit = Math.min(
+      Math.max(Number(filters.limit) || DEFAULT_SEARCH_LIMIT, 1),
+      MAX_SEARCH_LIMIT,
+    );
+    const skip = Math.max(Number(filters.offset) || 0, 0);
 
     if (hasGeo) {
       query.location = {
@@ -120,14 +139,17 @@ class OfferManager {
         },
       };
       // $near already returns nearest-first; no explicit sort
-      const raw = await OfferModel.find(query);
+      const raw = await OfferModel.find(query).limit(limit).skip(skip);
       return raw.map((doc) => doc.toEntity());
     }
 
-    const raw = await OfferModel.find(query).sort({
-      publishedAt: -1,
-      created: -1,
-    });
+    const raw = await OfferModel.find(query)
+      .sort({
+        publishedAt: -1,
+        created: -1,
+      })
+      .limit(limit)
+      .skip(skip);
     return raw.map((doc) => doc.toEntity());
   }
 }

@@ -7,6 +7,7 @@ describe("UserController — changeMyPassword (logged-in password change)", () =
   let sandbox;
   let UserManager;
   let UserController;
+  let JwtHelper;
 
   const res = () => ({
     statusCode: null,
@@ -39,6 +40,8 @@ describe("UserController — changeMyPassword (logged-in password change)", () =
       updateUser: sandbox.stub().resolves(),
     };
     mock("../../src/commons/data-managers/user-manager", UserManager);
+    JwtHelper = { revokeAllUserTokens: sandbox.stub().resolves() };
+    mock("../../src/commons/utilities/jwt-helper", JwtHelper);
     UserController = mock.reRequire(
       "../../src/platform/api/controllers/user-controller",
     );
@@ -104,6 +107,18 @@ describe("UserController — changeMyPassword (logged-in password change)", () =
     const saved = UserManager.updateUser.firstCall.args[0];
     expect(saved.verifyPassword("newsecret123")).to.equal(true);
     expect(saved.verifyPassword("realold12")).to.equal(false);
+  });
+
+  it("revokes all existing sessions after a successful change", async () => {
+    UserManager.getUserBy.resolves(makeUser("realold12"));
+    const r = res();
+    await UserController.changeMyPassword(
+      req({ currentPassword: "realold12", newPassword: "newsecret123" }),
+      r,
+    );
+    expect(r.statusCode).to.equal(200);
+    expect(JwtHelper.revokeAllUserTokens.calledOnce).to.equal(true);
+    expect(JwtHelper.revokeAllUserTokens.firstCall.args[0]).to.equal("u@x.de");
   });
 
   it("looks the user up by EXACT id (not the unanchored regex getUser)", async () => {

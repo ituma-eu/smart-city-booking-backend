@@ -6,37 +6,42 @@ const {
   NextcloudManager,
 } = require("../../../commons/data-managers/file-manager");
 const { v4: uuidv4 } = require("uuid");
+const { sendError } = require("../../../commons/utilities/http-error");
+const { deleteFileByUrl } = require("../../../commons/utilities/file-url");
+const {
+  MAX_IMAGE_BYTES,
+  MAX_VIDEO_BYTES,
+} = require("../../../commons/utilities/upload-limits");
 
 const logger = bunyan.createLogger({
   name: "offer-controller.js",
   level: process.env.LOG_LEVEL,
 });
 
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
-
 class OfferController {
   static _fail(response, error, fallback) {
     logger.error(fallback, error);
-    return response
-      .status(error.status || error.statusCode || 500)
-      .send(error.message || fallback);
+    return sendError(response, error, fallback);
   }
 
   static async listOffers(request, response) {
     try {
       const tenantId = request.params.tenant;
       const companyId = request.params.id;
-      if (
-        !(await CompanyController.isMemberOrAdmin(
-          request.user.id,
-          tenantId,
-          companyId,
-        ))
-      ) {
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!access.isAdmin && !access.member) {
         return response.sendStatus(403);
       }
-      const offers = await OfferService.getCompanyOffers(tenantId, companyId);
+      const scope = CompanyController._memberBranchScope(access);
+      const offers = await OfferService.getCompanyOffers(
+        tenantId,
+        companyId,
+        scope,
+      );
       return response.status(200).send(offers);
     } catch (error) {
       return OfferController._fail(response, error, "Could not list offers");
@@ -47,19 +52,19 @@ class OfferController {
     try {
       const tenantId = request.params.tenant;
       const companyId = request.params.id;
-      if (
-        !(await CompanyController.isMemberOrAdmin(
-          request.user.id,
-          tenantId,
-          companyId,
-        ))
-      ) {
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!access.isAdmin && !access.member) {
         return response.sendStatus(403);
       }
+      const scope = CompanyController._memberBranchScope(access);
       const str = (v) =>
         v === undefined || v === null ? undefined : String(v);
       const stats = await OfferService.getCompanyStats(tenantId, companyId, {
-        branchId: str(request.query.branchId),
+        branchId: scope !== null ? scope : str(request.query.branchId),
         industryId: str(request.query.industryId),
       });
       return response.status(200).send(stats);
@@ -72,13 +77,12 @@ class OfferController {
     try {
       const tenantId = request.params.tenant;
       const companyId = request.params.id;
-      if (
-        !(await CompanyController.isMemberOrAdmin(
-          request.user.id,
-          tenantId,
-          companyId,
-        ))
-      ) {
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!access.isAdmin && !access.member) {
         return response.sendStatus(403);
       }
       const offer = await OfferService.getCompanyOffer(
@@ -86,6 +90,10 @@ class OfferController {
         companyId,
         request.params.offerId,
       );
+      const scope = CompanyController._memberBranchScope(access);
+      if (scope !== null && (offer.branchId || "") !== scope) {
+        return response.sendStatus(404);
+      }
       return response.status(200).send(offer);
     } catch (error) {
       return OfferController._fail(response, error, "Could not load offer");
@@ -231,6 +239,14 @@ class OfferController {
         filters.lng = lng;
         filters.radiusMeters = radiusKm * 1000;
       }
+      const limit = parseInt(q.limit, 10);
+      const offset = parseInt(q.offset, 10);
+      if (Number.isFinite(limit)) {
+        filters.limit = limit;
+      }
+      if (Number.isFinite(offset)) {
+        filters.offset = offset;
+      }
       const offers = await OfferService.searchPublicOffers(tenantId, filters);
       return response.status(200).send(offers);
     } catch (error) {
@@ -324,23 +340,7 @@ class OfferController {
   }
 
   static async _deleteMediaFile(tenantId, media) {
-    if (!media || !media.url) {
-      return;
-    }
-    let path = null;
-    try {
-      path = new URL(media.url).searchParams.get("name");
-    } catch {
-      return;
-    }
-    if (!path) {
-      return;
-    }
-    try {
-      await NextcloudManager.deleteFile(tenantId, path);
-    } catch (e) {
-      logger.warn(`Could not delete offer media file: ${e.message}`);
-    }
+    await deleteFileByUrl(tenantId, media && media.url);
   }
 
   static async _loadEditableOffer(request) {
@@ -366,13 +366,12 @@ class OfferController {
     try {
       const tenantId = request.params.tenant;
       const companyId = request.params.id;
-      if (
-        !(await CompanyController.isMemberOrAdmin(
-          request.user.id,
-          tenantId,
-          companyId,
-        ))
-      ) {
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!access.isAdmin && !access.member) {
         return response.sendStatus(403);
       }
       const offer = await OfferManager.getOffer(
@@ -380,6 +379,10 @@ class OfferController {
         request.params.offerId,
       );
       if (!offer || offer.companyId !== companyId) {
+        return response.sendStatus(404);
+      }
+      const scope = CompanyController._memberBranchScope(access);
+      if (scope !== null && (offer.branchId || "") !== scope) {
         return response.sendStatus(404);
       }
       const media = await OfferService.listOfferMedia(

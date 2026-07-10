@@ -63,8 +63,13 @@ class ApplicationManager {
     await ApplicationModel.deleteMany({ tenantId, companyId });
   }
 
-  static async removeByStudent(tenantId, studentUserId) {
-    await ApplicationModel.deleteMany({ tenantId, studentUserId });
+  static async getAllByStudent(studentUserId) {
+    const raw = await ApplicationModel.find({ studentUserId });
+    return raw.map((doc) => doc.toEntity());
+  }
+
+  static async removeByStudentAllTenants(studentUserId) {
+    await ApplicationModel.deleteMany({ studentUserId });
   }
 
   static async updateStatus(tenantId, id, status) {

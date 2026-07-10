@@ -8,6 +8,8 @@ const TenantManager = require("../../data-managers/tenant-manager");
 const CompanyManager = require("../../data-managers/company-manager");
 const CompanyMemberManager = require("../../data-managers/company-member-manager");
 const CompanyMediaManager = require("../../data-managers/company-media-manager");
+const { NextcloudManager } = require("../../data-managers/file-manager");
+const { deleteFileByUrl } = require("../../utilities/file-url");
 const CompanyBranchManager = require("../../data-managers/company-branch-manager");
 const OfferManager = require("../../data-managers/offer-manager");
 const MemberInvitationManager = require("../../data-managers/member-invitation-manager");
@@ -20,6 +22,7 @@ const MailController = require("../../mail-service/mail-controller");
 const { isEmail, isURL } = require("validator");
 
 const DESCRIPTION_MAX_LENGTH = 2000;
+const MAX_MEDIA_ITEMS = 12;
 const RESEND_VERIFICATION_COOLDOWN_MS = 60 * 1000;
 const lastVerificationResend = new Map();
 
@@ -300,11 +303,11 @@ class CompanyService {
     const user = new User({
       id: email,
       secret: undefined,
-      firstName: owner.firstName,
-      lastName: owner.lastName,
-      company: companyData.name,
+      firstName,
+      lastName,
+      company: name,
     });
-    user.setPassword(owner.password);
+    user.setPassword(password);
 
     let company = null;
     try {
@@ -563,6 +566,16 @@ class CompanyService {
     const company = await CompanyManager.getCompany(tenantId, companyId);
     if (!company) {
       throw { message: "Company not found", status: 404 };
+    }
+    const existing = await CompanyMediaManager.getMediaByCompany(
+      tenantId,
+      companyId,
+    );
+    if (existing.length >= MAX_MEDIA_ITEMS) {
+      throw {
+        message: `A company can have at most ${MAX_MEDIA_ITEMS} media items`,
+        status: 409,
+      };
     }
     return CompanyMediaManager.storeMedia({
       id: uuidv4(),
@@ -883,6 +896,20 @@ class CompanyService {
       };
     }
 
+    const media = await CompanyMediaManager.getMediaByCompany(
+      tenantId,
+      companyId,
+    );
+    for (const item of media) {
+      if (item.fileName) {
+        await NextcloudManager.deleteFile(tenantId, item.fileName).catch(
+          () => {},
+        );
+      }
+      await CompanyMediaManager.removeMedia(tenantId, item.id);
+    }
+    await deleteFileByUrl(tenantId, company.logoUrl);
+
     await ApplicationService.deleteByCompany(tenantId, companyId);
     await CompanyManager.deleteCompany(tenantId, companyId);
     await CompanyMemberManager.removeMember(tenantId, companyId, userId);
@@ -959,46 +986,60 @@ class CompanyService {
     user.isVerified = true;
     await UserManager.createUser(user);
 
-    const role = await CompanyRoleService.ensureUnternehmenRole(tenantId);
-    const membership = await MembershipManager.getMembershipByTenantAndUserID(
-      tenantId,
-      email,
-    );
-    const membershipStatus = activate ? "active" : "pending";
-    if (!membership) {
-      await MembershipManager.addMembership(tenantId, {
-        userId: email,
-        source: "invite",
-        status: membershipStatus,
-        owner: false,
-      });
-    } else {
-      await MembershipManager.updateMembership(tenantId, email, {
-        status: membershipStatus,
-      });
-    }
-    if (activate) {
-      await MembershipManager.addRoleToMembership(tenantId, email, role.id);
-    }
-
-    let branchId = invitation.branchId || "";
-    if (branchId) {
-      const branch = await CompanyBranchManager.getBranch(tenantId, branchId);
-      if (!branch || branch.companyId !== invitation.companyId) {
-        branchId = "";
+    try {
+      const role = await CompanyRoleService.ensureUnternehmenRole(tenantId);
+      const membership = await MembershipManager.getMembershipByTenantAndUserID(
+        tenantId,
+        email,
+      );
+      const membershipStatus = activate ? "active" : "pending";
+      if (!membership) {
+        await MembershipManager.addMembership(tenantId, {
+          userId: email,
+          source: "invite",
+          status: membershipStatus,
+          owner: false,
+        });
+      } else {
+        await MembershipManager.updateMembership(tenantId, email, {
+          status: membershipStatus,
+        });
       }
+      if (activate) {
+        await MembershipManager.addRoleToMembership(tenantId, email, role.id);
+      }
+
+      let branchId = invitation.branchId || "";
+      if (branchId) {
+        const branch = await CompanyBranchManager.getBranch(tenantId, branchId);
+        if (!branch || branch.companyId !== invitation.companyId) {
+          branchId = "";
+        }
+      }
+
+      await CompanyMemberManager.storeMember({
+        id: uuidv4(),
+        tenantId,
+        companyId: invitation.companyId,
+        userId: email,
+        isOwner: false,
+        branchId,
+      });
+
+      await MemberInvitationManager.remove(tenantId, invitation.id);
+    } catch (err) {
+      // A failure after createUser would otherwise orphan the user and leave
+      // the invitation pending, permanently locking the invitee out (the 409
+      // existing-user guard above trips on every retry). Undo the writes.
+      await CompanyMemberManager.removeMember(
+        tenantId,
+        invitation.companyId,
+        email,
+      ).catch(() => {});
+      await MembershipManager.removeMembership(tenantId, email).catch(() => {});
+      await UserManager.deleteUser(email).catch(() => {});
+      throw err;
     }
-
-    await CompanyMemberManager.storeMember({
-      id: uuidv4(),
-      tenantId,
-      companyId: invitation.companyId,
-      userId: email,
-      isOwner: false,
-      branchId,
-    });
-
-    await MemberInvitationManager.remove(tenantId, invitation.id);
     return { companyId: invitation.companyId, userId: email };
   }
 }

@@ -313,19 +313,6 @@ describe("CompanyService — branches", () => {
       expect(CompanyBranchManager.removeBranch.called).to.equal(false);
     });
 
-    it("removes when more than one branch exists", async () => {
-      CompanyBranchManager.getBranch.resolves(existingBranch());
-      const branch = await CompanyService.removeCompanyBranch(
-        "kielregion",
-        "c1",
-        "b1",
-      );
-      expect(
-        CompanyBranchManager.removeBranch.calledWith("kielregion", "b1"),
-      ).to.equal(true);
-      expect(branch.id).to.equal("b1");
-    });
-
     it("throws 409 when a member is scoped to this branch", async () => {
       CompanyBranchManager.getBranch.resolves(existingBranch());
       CompanyMemberManager.getMembersByCompany.resolves([

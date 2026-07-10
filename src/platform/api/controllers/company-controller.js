@@ -8,6 +8,12 @@ const {
   NextcloudManager,
 } = require("../../../commons/data-managers/file-manager");
 const { v4: uuidv4 } = require("uuid");
+const { sendError } = require("../../../commons/utilities/http-error");
+const { deleteFileByUrl } = require("../../../commons/utilities/file-url");
+const {
+  MAX_IMAGE_BYTES,
+  MAX_VIDEO_BYTES,
+} = require("../../../commons/utilities/upload-limits");
 
 const logger = bunyan.createLogger({
   name: "company-controller.js",
@@ -15,8 +21,6 @@ const logger = bunyan.createLogger({
 });
 
 const COMPANY_STATUS_FILTERS = ["unverified", "verified", "blocked"];
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
 class CompanyController {
   static async register(request, response) {
@@ -31,9 +35,7 @@ class CompanyController {
         .send({ id: company.id, status: company.status });
     } catch (error) {
       logger.error("Could not register company", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not register company");
+      return sendError(response, error, "Could not register company");
     }
   }
 
@@ -51,9 +53,7 @@ class CompanyController {
       });
     } catch (error) {
       logger.error("Could not resend verification", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not resend verification");
+      return sendError(response, error, "Could not resend verification");
     }
   }
 
@@ -259,9 +259,7 @@ class CompanyController {
       return response.status(200).send(CompanyController._withLatLng(company));
     } catch (error) {
       logger.error("Could not update company profile", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not update company profile");
+      return sendError(response, error, "Could not update company profile");
     }
   }
 
@@ -297,8 +295,6 @@ class CompanyController {
       if (!existing) {
         return response.sendStatus(404);
       }
-      await CompanyController._deleteLogoFile(tenantId, existing.logoUrl);
-
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const fileName = `${companyId}-${safeName}`;
       await NextcloudManager.createFile(
@@ -314,12 +310,13 @@ class CompanyController {
         companyId,
         logoUrl,
       );
+      if (existing.logoUrl && existing.logoUrl !== logoUrl) {
+        await CompanyController._deleteLogoFile(tenantId, existing.logoUrl);
+      }
       return response.status(200).send(CompanyController._withLatLng(company));
     } catch (error) {
       logger.error("Could not upload logo", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not upload logo");
+      return sendError(response, error, "Could not upload logo");
     }
   }
 
@@ -348,9 +345,7 @@ class CompanyController {
       return response.status(200).send(CompanyController._withLatLng(company));
     } catch (error) {
       logger.error("Could not remove logo", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not remove logo");
+      return sendError(response, error, "Could not remove logo");
     }
   }
 
@@ -431,9 +426,7 @@ class CompanyController {
       return response.status(201).send(media);
     } catch (error) {
       logger.error("Could not upload media", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not upload media");
+      return sendError(response, error, "Could not upload media");
     }
   }
 
@@ -465,9 +458,7 @@ class CompanyController {
       return response.status(200).send({ id: media.id });
     } catch (error) {
       logger.error("Could not remove media", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not remove media");
+      return sendError(response, error, "Could not remove media");
     }
   }
 
@@ -484,9 +475,7 @@ class CompanyController {
       return response.status(200).send(CompanyController._withLatLng(company));
     } catch (error) {
       logger.error("Could not verify company", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not verify company");
+      return sendError(response, error, "Could not verify company");
     }
   }
 
@@ -503,9 +492,7 @@ class CompanyController {
       return response.status(200).send(CompanyController._withLatLng(company));
     } catch (error) {
       logger.error("Could not block company", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not block company");
+      return sendError(response, error, "Could not block company");
     }
   }
 
@@ -559,9 +546,7 @@ class CompanyController {
       return response.status(200).send(branch);
     } catch (error) {
       logger.error("Could not get branch", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not get branch");
+      return sendError(response, error, "Could not get branch");
     }
   }
 
@@ -584,9 +569,7 @@ class CompanyController {
       return response.status(201).send(branch);
     } catch (error) {
       logger.error("Could not create branch", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not create branch");
+      return sendError(response, error, "Could not create branch");
     }
   }
 
@@ -612,9 +595,7 @@ class CompanyController {
       return response.status(200).send(branch);
     } catch (error) {
       logger.error("Could not update branch", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not update branch");
+      return sendError(response, error, "Could not update branch");
     }
   }
 
@@ -638,9 +619,7 @@ class CompanyController {
       return response.status(200).send({ id: branch.id });
     } catch (error) {
       logger.error("Could not remove branch", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not remove branch");
+      return sendError(response, error, "Could not remove branch");
     }
   }
 
@@ -677,8 +656,6 @@ class CompanyController {
         companyId,
         branchId,
       );
-      await CompanyController._deleteLogoFile(tenantId, existing.logoUrl);
-
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const fileName = `${branchId}-${safeName}`;
       await NextcloudManager.createFile(
@@ -695,12 +672,13 @@ class CompanyController {
         branchId,
         logoUrl,
       );
+      if (existing.logoUrl && existing.logoUrl !== logoUrl) {
+        await CompanyController._deleteLogoFile(tenantId, existing.logoUrl);
+      }
       return response.status(200).send(branch);
     } catch (error) {
       logger.error("Could not upload branch logo", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not upload branch logo");
+      return sendError(response, error, "Could not upload branch logo");
     }
   }
 
@@ -731,9 +709,7 @@ class CompanyController {
       return response.status(200).send(branch);
     } catch (error) {
       logger.error("Could not remove branch logo", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not remove branch logo");
+      return sendError(response, error, "Could not remove branch logo");
     }
   }
 
@@ -762,9 +738,7 @@ class CompanyController {
       return response.status(201).send(invitation);
     } catch (error) {
       logger.error("Could not invite member", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not invite member");
+      return sendError(response, error, "Could not invite member");
     }
   }
 
@@ -815,9 +789,7 @@ class CompanyController {
       return response.status(200).send(result);
     } catch (error) {
       logger.error("Could not remove member", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not remove member");
+      return sendError(response, error, "Could not remove member");
     }
   }
 
@@ -849,9 +821,7 @@ class CompanyController {
         });
       }
       logger.error("Could not delete company account", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not delete company account");
+      return sendError(response, error, "Could not delete company account");
     }
   }
 
@@ -866,9 +836,7 @@ class CompanyController {
       return response.status(200).send(result);
     } catch (error) {
       logger.error("Could not accept invitation", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not accept invitation");
+      return sendError(response, error, "Could not accept invitation");
     }
   }
 
@@ -940,23 +908,7 @@ class CompanyController {
   }
 
   static async _deleteLogoFile(tenantId, logoUrl) {
-    if (!logoUrl) {
-      return;
-    }
-    let path = null;
-    try {
-      path = new URL(logoUrl).searchParams.get("name");
-    } catch {
-      return;
-    }
-    if (!path) {
-      return;
-    }
-    try {
-      await NextcloudManager.deleteFile(tenantId, path);
-    } catch (e) {
-      logger.warn(`Could not delete logo file: ${e.message}`);
-    }
+    await deleteFileByUrl(tenantId, logoUrl);
   }
 }
 

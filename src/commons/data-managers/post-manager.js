@@ -2,6 +2,9 @@ const Post = require("../entities/post/post");
 const PostModel = require("./models/postModel");
 const { escapeRegex } = require("../utilities/regexUtils");
 
+const DEFAULT_PUBLIC_LIMIT = 50;
+const MAX_PUBLIC_LIMIT = 100;
+
 // Public reads only ever return published posts that are not flagged
 // company-dashboard-only.
 function publicQuery(tenantId) {
@@ -21,11 +24,13 @@ class PostManager {
       const rx = new RegExp(escapeRegex(q), "i");
       query.$or = [{ title: rx }, { excerpt: rx }];
     }
-    let cursor = PostModel.find(query).sort({ publishedAt: -1, created: -1 });
-    if (limit) {
-      cursor = cursor.limit(limit);
-    }
-    const raw = await cursor;
+    const cap = Math.min(
+      Math.max(Number(limit) || DEFAULT_PUBLIC_LIMIT, 1),
+      MAX_PUBLIC_LIMIT,
+    );
+    const raw = await PostModel.find(query)
+      .sort({ publishedAt: -1, created: -1 })
+      .limit(cap);
     return raw.map((doc) => doc.toEntity());
   }
 
@@ -68,7 +73,11 @@ class PostManager {
   static async store(post, upsert = true) {
     const entity = post instanceof Post ? post : new Post(post);
     entity.validate();
-    await PostModel.updateOne({ id: entity.id }, { ...entity }, { upsert });
+    await PostModel.updateOne(
+      { id: entity.id, tenantId: entity.tenantId },
+      { ...entity },
+      { upsert, runValidators: true },
+    );
     return entity;
   }
 

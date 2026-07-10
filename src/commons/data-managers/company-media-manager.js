@@ -23,9 +23,9 @@ class CompanyMediaManager {
     mediaEntity.validate();
     // pass a copy: Mongoose mutates the update object with $setOnInsert on upsert
     await CompanyMediaModel.updateOne(
-      { id: mediaEntity.id },
+      { id: mediaEntity.id, tenantId: mediaEntity.tenantId },
       { ...mediaEntity },
-      { upsert },
+      { upsert, runValidators: true },
     );
     return mediaEntity;
   }

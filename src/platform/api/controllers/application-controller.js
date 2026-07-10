@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require("uuid");
 const ApplicationService = require("../../../commons/services/student/application-service");
 const PlatformSettingsService = require("../../../commons/services/platform-settings-service");
 const CompanyController = require("./company-controller");
+const { sendError } = require("../../../commons/utilities/http-error");
 const {
   NextcloudManager,
 } = require("../../../commons/data-managers/file-manager");
@@ -49,9 +50,7 @@ class ApplicationController {
       return response.status(201).send({ id: result.id });
     } catch (error) {
       logger.error("Could not submit application", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not submit application");
+      return sendError(response, error, "Could not submit application");
     }
   }
 
@@ -64,9 +63,7 @@ class ApplicationController {
       return response.status(200).send(applications);
     } catch (error) {
       logger.error("Could not load applications", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not load applications");
+      return sendError(response, error, "Could not load applications");
     }
   }
 
@@ -91,9 +88,7 @@ class ApplicationController {
       return response.status(200).send(applications);
     } catch (error) {
       logger.error("Could not load company applications", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not load company applications");
+      return sendError(response, error, "Could not load company applications");
     }
   }
 
@@ -120,9 +115,7 @@ class ApplicationController {
       return response.status(200).send(result);
     } catch (error) {
       logger.error("Could not update application status", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not update application status");
+      return sendError(response, error, "Could not update application status");
     }
   }
 
@@ -172,12 +165,16 @@ class ApplicationController {
       const documentId = uuidv4();
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const bareName = `${documentId}-${safeName}`;
-      const subDirectory = `protected/application-documents/${applicationId}`;
+      // Application documents must not live under public/ or protected/: the
+      // generic /files/list and /files/get routes enumerate and serve those
+      // trees to any authenticated caller. A dedicated root keeps the
+      // ownership-checked downloadDocument endpoint as the only reader.
+      const subDirectory = `application-documents/${applicationId}`;
       await NextcloudManager.createFile(
         tenantId,
         file.data,
         bareName,
-        "protected",
+        "private",
         subDirectory,
       );
       const ref = {
@@ -196,9 +193,11 @@ class ApplicationController {
         );
     } catch (error) {
       logger.error("Could not upload application document", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not upload application document");
+      return sendError(
+        response,
+        error,
+        "Could not upload application document",
+      );
     }
   }
 
@@ -224,9 +223,7 @@ class ApplicationController {
         );
     } catch (error) {
       logger.error("Could not list application documents", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not list application documents");
+      return sendError(response, error, "Could not list application documents");
     }
   }
 
@@ -258,9 +255,11 @@ class ApplicationController {
       return response.status(200).send(data);
     } catch (error) {
       logger.error("Could not download application document", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not download application document");
+      return sendError(
+        response,
+        error,
+        "Could not download application document",
+      );
     }
   }
 
@@ -290,9 +289,11 @@ class ApplicationController {
       return response.status(200).send(result);
     } catch (error) {
       logger.error("Could not remove application document", error);
-      return response
-        .status(error.status || 500)
-        .send(error.message || "Could not remove application document");
+      return sendError(
+        response,
+        error,
+        "Could not remove application document",
+      );
     }
   }
 }

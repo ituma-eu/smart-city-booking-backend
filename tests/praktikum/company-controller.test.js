@@ -711,7 +711,7 @@ describe("CompanyController — authz & handlers", () => {
         },
       });
 
-      it("a branch-scoped member uploads OWN branch logo (200), deleting the old file first", async () => {
+      it("a branch-scoped member uploads OWN branch logo (200), deleting the old file after the new one is stored", async () => {
         asBranchMember("c1", "b1");
         CompanyService.getCompanyBranch.resolves({
           id: "b1",
@@ -737,7 +737,7 @@ describe("CompanyController — authz & handlers", () => {
           ),
         ).to.equal(true);
         expect(
-          NextcloudManager.deleteFile.calledBefore(NextcloudManager.createFile),
+          NextcloudManager.deleteFile.calledAfter(NextcloudManager.createFile),
         ).to.equal(true);
         expect(CompanyService.setBranchLogo.calledOnce).to.equal(true);
       });
@@ -1168,7 +1168,7 @@ describe("CompanyController — authz & handlers", () => {
       expect(CompanyService.setCompanyLogo.calledOnce).to.equal(true);
     });
 
-    it("deletes the previous logo file before storing the new one", async () => {
+    it("deletes the previous logo file after storing the new one", async () => {
       asOwnerOf("c1");
       CompanyManager.getCompany.resolves({
         id: "c1",
@@ -1185,7 +1185,7 @@ describe("CompanyController — authz & handlers", () => {
         ),
       ).to.equal(true);
       expect(
-        NextcloudManager.deleteFile.calledBefore(NextcloudManager.createFile),
+        NextcloudManager.deleteFile.calledAfter(NextcloudManager.createFile),
       ).to.equal(true);
     });
 

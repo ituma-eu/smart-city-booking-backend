@@ -54,7 +54,16 @@ class PlatformSettingsService {
       }
     }
 
-    return PlatformSettingsManager.store(PlatformSettings.create(next));
+    let entity;
+    try {
+      entity = PlatformSettings.create(next);
+    } catch (err) {
+      throw {
+        message: err.message,
+        status: err.status || err.statusCode || 400,
+      };
+    }
+    return PlatformSettingsManager.store(entity);
   }
 }
 

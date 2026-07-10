@@ -4,6 +4,7 @@ const OfferManager = require("../../data-managers/offer-manager");
 const StudentManager = require("../../data-managers/student-manager");
 const UserManager = require("../../data-managers/user-manager");
 const CompanyBranchManager = require("../../data-managers/company-branch-manager");
+const CompanyManager = require("../../data-managers/company-manager");
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
 const PlatformSettingsService = require("../platform-settings-service");
 const { NextcloudManager } = require("../../data-managers/file-manager");
@@ -117,6 +118,10 @@ class ApplicationService {
     if (!offer || offer.status !== "Online") {
       throw { message: "Offer not found", status: 404 };
     }
+    const company = await CompanyManager.getCompany(tenantId, offer.companyId);
+    if (!company || company.status === "blocked") {
+      throw { message: "Offer not found", status: 404 };
+    }
     if (isDeadlinePassed(offer.applicationDeadline)) {
       throw {
         message: "The application deadline for this offer has passed",
@@ -136,7 +141,7 @@ class ApplicationService {
       };
     }
 
-    const user = await UserManager.getUser(userId, false);
+    const user = await UserManager.getUserBy({ id: userId }, false);
     if (!user) {
       throw { message: "User not found", status: 404 };
     }
@@ -183,7 +188,11 @@ class ApplicationService {
   }
 
   static async listMyApplications(tenantId, userId) {
-    const applications = await ApplicationManager.listByUser(tenantId, userId);
+    const all = await ApplicationManager.listByUser(tenantId, userId);
+    const blocked = new Set(
+      await CompanyManager.getBlockedCompanyIds(tenantId),
+    );
+    const applications = all.filter((a) => !blocked.has(a.companyId));
     if (applications.length === 0) {
       return [];
     }
@@ -303,14 +312,17 @@ class ApplicationService {
     return { removed: applications.length };
   }
 
-  // Same, for every application a student submitted (student account deletion).
-  static async deleteByStudent(tenantId, studentUserId) {
-    const applications = await ApplicationManager.listByUser(
-      tenantId,
-      studentUserId,
-    );
-    await ApplicationService._deleteDocumentFiles(tenantId, applications);
-    await ApplicationManager.removeByStudent(tenantId, studentUserId);
+  // Every application a student submitted, across ALL tenants: deleting the
+  // global user account must not leave PII (documents included) in any tenant.
+  static async deleteByStudent(studentUserId) {
+    const applications =
+      await ApplicationManager.getAllByStudent(studentUserId);
+    for (const application of applications) {
+      await ApplicationService._deleteDocumentFiles(application.tenantId, [
+        application,
+      ]);
+    }
+    await ApplicationManager.removeByStudentAllTenants(studentUserId);
     return { removed: applications.length };
   }
 

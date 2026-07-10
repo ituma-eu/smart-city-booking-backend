@@ -20,9 +20,13 @@ class CompanyMemberManager {
       member instanceof CompanyMember ? member : new CompanyMember(member);
     memberEntity.validate();
     await CompanyMemberModel.updateOne(
-      { companyId: memberEntity.companyId, userId: memberEntity.userId },
-      memberEntity,
-      { upsert, setDefaultsOnInsert: true },
+      {
+        tenantId: memberEntity.tenantId,
+        companyId: memberEntity.companyId,
+        userId: memberEntity.userId,
+      },
+      { ...memberEntity },
+      { upsert, setDefaultsOnInsert: true, runValidators: true },
     );
     return memberEntity;
   }
