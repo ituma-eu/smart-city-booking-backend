@@ -6,6 +6,7 @@ const CompanyManager = require("../../data-managers/company-manager");
 const CompanyBranchManager = require("../../data-managers/company-branch-manager");
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
 const PlatformSettingsService = require("../platform-settings-service");
+const ApplicationService = require("../student/application-service");
 
 const CONTACT_CHANNELS = [
   "Direktbewerbung über Plattform",
@@ -404,6 +405,7 @@ class OfferService {
     if (!offer || offer.companyId !== companyId) {
       throw { message: "Offer not found", status: 404 };
     }
+    await ApplicationService.deleteByOffer(tenantId, offerId);
     await OfferMediaManager.removeByOffer(tenantId, offerId);
     await OfferManager.removeOffer(tenantId, offerId);
     return { removed: offerId };

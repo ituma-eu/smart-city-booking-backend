@@ -50,6 +50,23 @@ class ApplicationManager {
     return raw.map((doc) => doc.toEntity());
   }
 
+  static async getByOffer(tenantId, offerId) {
+    const raw = await ApplicationModel.find({ tenantId, offerId });
+    return raw.map((doc) => doc.toEntity());
+  }
+
+  static async removeByOffer(tenantId, offerId) {
+    await ApplicationModel.deleteMany({ tenantId, offerId });
+  }
+
+  static async removeByCompany(tenantId, companyId) {
+    await ApplicationModel.deleteMany({ tenantId, companyId });
+  }
+
+  static async removeByStudent(tenantId, studentUserId) {
+    await ApplicationModel.deleteMany({ tenantId, studentUserId });
+  }
+
   static async updateStatus(tenantId, id, status) {
     await ApplicationModel.updateOne({ tenantId, id }, { $set: { status } });
   }

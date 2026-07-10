@@ -20,6 +20,7 @@ const CompanyController = require("./controllers/company-controller");
 const SettingsController = require("./controllers/settings-controller");
 const OfferController = require("./controllers/offer-controller");
 const TaxonomyController = require("./controllers/taxonomy-controller");
+const PostController = require("./controllers/post-controller");
 const StudentController = require("./controllers/student-controller");
 const AccountDeletionController = require("./controllers/account-deletion-controller");
 const ApplicationController = require("./controllers/application-controller");
@@ -109,6 +110,11 @@ router.put(
   "/companies/:id",
   AuthenticationController.isSignedIn,
   CompanyController.updateProfile,
+);
+router.delete(
+  "/companies/:id",
+  AuthenticationController.isSignedIn,
+  CompanyController.deleteAccount,
 );
 router.post(
   "/companies/:id/logo",
@@ -204,6 +210,68 @@ router.post(
 // ==========
 
 router.get("/taxonomies", TaxonomyController.getTaxonomies);
+
+// POSTS / INFOS (CMS)
+// ==================
+
+router.get("/posts", PostController.list);
+router.get("/post-tags", PostController.tags);
+router.get("/posts/:slug", PostController.getBySlug);
+router.get(
+  "/admin/posts",
+  AuthenticationController.isSignedIn,
+  PostController.adminList,
+);
+router.post(
+  "/admin/posts",
+  AuthenticationController.isSignedIn,
+  PostController.create,
+);
+router.put(
+  "/admin/posts/:id",
+  AuthenticationController.isSignedIn,
+  PostController.update,
+);
+router.post(
+  "/admin/posts/:id/publish",
+  AuthenticationController.isSignedIn,
+  PostController.publish,
+);
+router.post(
+  "/admin/posts/:id/unpublish",
+  AuthenticationController.isSignedIn,
+  PostController.unpublish,
+);
+router.delete(
+  "/admin/posts/:id",
+  AuthenticationController.isSignedIn,
+  PostController.remove,
+);
+router.get(
+  "/me/company-posts",
+  AuthenticationController.isSignedIn,
+  PostController.companyList,
+);
+router.post(
+  "/admin/posts/:id/thumbnail",
+  AuthenticationController.isSignedIn,
+  PostController.uploadThumbnail,
+);
+router.delete(
+  "/admin/posts/:id/thumbnail",
+  AuthenticationController.isSignedIn,
+  PostController.removeThumbnail,
+);
+router.post(
+  "/admin/posts/:id/attachments",
+  AuthenticationController.isSignedIn,
+  PostController.uploadAttachment,
+);
+router.delete(
+  "/admin/posts/:id/attachments/:attId",
+  AuthenticationController.isSignedIn,
+  PostController.removeAttachment,
+);
 
 // SETTINGS
 // ========

@@ -15,7 +15,6 @@ const applicationSchemaDefinition = {
   consentAt: { type: Number, default: null },
   status: {
     type: String,
-    enum: ["Neu", "In Prüfung", "Eingeladen", "Abgesagt"],
     default: "Neu",
   },
   documents: { type: Array, default: [] },

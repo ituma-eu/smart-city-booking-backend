@@ -7,6 +7,7 @@ const OfferBookmarkManager = require("../../data-managers/offer-bookmark-manager
 const MembershipManager = require("../../data-managers/membership-manager");
 const JwtHelper = require("../../utilities/jwt-helper");
 const AccountDeletionService = require("../account-deletion-service");
+const ApplicationService = require("./application-service");
 const { isEmail } = require("validator");
 
 const TARGET_GROUPS = ["pupil", "student", "career_changer"];
@@ -303,6 +304,7 @@ class StudentService {
       reason,
     );
     await OfferBookmarkManager.removeByUser(userId);
+    await ApplicationService.deleteByStudent(tenantId, userId);
     await StudentManager.removeStudent(userId);
     // Count only once the student is actually gone; a retry now hits the 404
     // guard above and cannot double-count.

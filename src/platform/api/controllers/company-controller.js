@@ -821,6 +821,40 @@ class CompanyController {
     }
   }
 
+  static async deleteAccount(request, response) {
+    try {
+      const { tenant: tenantId, id: companyId } = request.params;
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!access.member || access.member.isOwner !== true) {
+        return response.sendStatus(403);
+      }
+      const result = await CompanyService.deleteOwnerAccount(
+        tenantId,
+        companyId,
+        request.user.id,
+        request.body && request.body.reason,
+      );
+      return response.status(200).send(result);
+    } catch (error) {
+      if (error && error.status === 409) {
+        return response.status(409).send({
+          message: error.message,
+          memberCount: error.memberCount,
+          branchCount: error.branchCount,
+          offerCount: error.offerCount,
+        });
+      }
+      logger.error("Could not delete company account", error);
+      return response
+        .status(error.status || 500)
+        .send(error.message || "Could not delete company account");
+    }
+  }
+
   static async acceptInvitation(request, response) {
     try {
       const tenantId = request.params.tenant;

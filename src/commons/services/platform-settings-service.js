@@ -1,5 +1,6 @@
 const PlatformSettings = require("../entities/settings/platformSettings");
 const PlatformSettingsManager = require("../data-managers/platform-settings-manager");
+const TaxonomyTermManager = require("../data-managers/taxonomy-term-manager");
 
 const TEXT_FIELDS = [
   "logoUrl",
@@ -28,6 +29,19 @@ class PlatformSettingsService {
       next.directPublishVerified =
         payload.directPublishVerified === true ||
         payload.directPublishVerified === "true";
+    }
+    if (payload.defaultApplicationStatus !== undefined) {
+      const statusTerms = await TaxonomyTermManager.getTerms(tenantId, {
+        type: "application_status",
+      });
+      if (
+        !statusTerms.some(
+          (term) => term.name === payload.defaultApplicationStatus,
+        )
+      ) {
+        throw { message: "Invalid default application status", status: 400 };
+      }
+      next.defaultApplicationStatus = payload.defaultApplicationStatus;
     }
     for (const key of TEXT_FIELDS) {
       if (payload[key] !== undefined) {

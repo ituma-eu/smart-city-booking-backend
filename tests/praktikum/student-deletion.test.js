@@ -10,6 +10,7 @@ describe("StudentService — deleteAccount", () => {
   let MembershipManager;
   let JwtHelper;
   let AccountDeletionService;
+  let ApplicationService;
   let StudentService;
   const userId = "lena@example.de";
   const reason = "deletion_reason_student-praktikumsplatz-gefunden";
@@ -31,6 +32,9 @@ describe("StudentService — deleteAccount", () => {
       assertValidReason: sandbox.stub().resolves(reason),
       increment: sandbox.stub().resolves(),
     };
+    ApplicationService = {
+      deleteByStudent: sandbox.stub().resolves({ removed: 0 }),
+    };
     mock("../../src/commons/data-managers/user-manager", UserManager);
     mock("../../src/commons/data-managers/student-manager", StudentManager);
     mock(
@@ -45,6 +49,10 @@ describe("StudentService — deleteAccount", () => {
     mock(
       "../../src/commons/services/account-deletion-service",
       AccountDeletionService,
+    );
+    mock(
+      "../../src/commons/services/student/application-service",
+      ApplicationService,
     );
     StudentService = mock.reRequire(
       "../../src/commons/services/student/student-service",
@@ -89,6 +97,9 @@ describe("StudentService — deleteAccount", () => {
       ),
     ).to.equal(true);
     expect(OfferBookmarkManager.removeByUser.calledWith(userId)).to.equal(true);
+    expect(
+      ApplicationService.deleteByStudent.calledWith("kielregion", userId),
+    ).to.equal(true);
     expect(StudentManager.removeStudent.calledWith(userId)).to.equal(true);
     expect(
       MembershipManager.removeMembership.calledWith("kielregion", userId),
@@ -104,6 +115,9 @@ describe("StudentService — deleteAccount", () => {
     ]);
     await StudentService.deleteAccount("kielregion", userId, reason);
     expect(OfferBookmarkManager.removeByUser.calledWith(userId)).to.equal(true);
+    expect(
+      ApplicationService.deleteByStudent.calledWith("kielregion", userId),
+    ).to.equal(true);
     expect(StudentManager.removeStudent.calledWith(userId)).to.equal(true);
     expect(UserManager.deleteUser.called).to.equal(false);
   });
@@ -121,6 +135,7 @@ describe("StudentService — deleteAccount", () => {
     }
     expect(err && err.status).to.equal(400);
     expect(OfferBookmarkManager.removeByUser.called).to.equal(false);
+    expect(ApplicationService.deleteByStudent.called).to.equal(false);
     expect(StudentManager.removeStudent.called).to.equal(false);
     expect(AccountDeletionService.increment.called).to.equal(false);
     expect(UserManager.deleteUser.called).to.equal(false);
@@ -138,6 +153,7 @@ describe("StudentService — deleteAccount", () => {
     expect(AccountDeletionService.assertValidReason.called).to.equal(false);
     expect(AccountDeletionService.increment.called).to.equal(false);
     expect(OfferBookmarkManager.removeByUser.called).to.equal(false);
+    expect(ApplicationService.deleteByStudent.called).to.equal(false);
     expect(UserManager.deleteUser.called).to.equal(false);
   });
 });

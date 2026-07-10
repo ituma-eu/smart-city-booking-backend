@@ -1,6 +1,7 @@
 const platformSettingsSchemaDefinition = {
   tenantId: { type: String, required: true, unique: true },
   directPublishVerified: { type: Boolean, default: false },
+  defaultApplicationStatus: { type: String, default: "Neu" },
   logoUrl: { type: String, default: "" },
   maxDocsPerInternship: { type: Number, default: 5, min: 1 },
   maxDocSizeMb: { type: Number, default: 10, min: 1 },

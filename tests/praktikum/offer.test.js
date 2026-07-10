@@ -10,6 +10,7 @@ describe("OfferService", () => {
   let CompanyBranchManager;
   let TaxonomyTermManager;
   let PlatformSettingsService;
+  let ApplicationServiceMock;
   let OfferService;
 
   const branch = () => ({
@@ -90,6 +91,13 @@ describe("OfferService", () => {
     mock(
       "../../src/commons/services/platform-settings-service",
       PlatformSettingsService,
+    );
+    ApplicationServiceMock = {
+      deleteByOffer: sandbox.stub().resolves({ removed: 0 }),
+    };
+    mock(
+      "../../src/commons/services/student/application-service",
+      ApplicationServiceMock,
     );
     OfferService = mock.reRequire(
       "../../src/commons/services/company/offer-service",
@@ -335,9 +343,12 @@ describe("OfferService", () => {
         404,
       );
     });
-    it("deleteOffer: removes the offer and its media", async () => {
+    it("deleteOffer: removes the offer, its media and its applications", async () => {
       OfferManager.getOffer.resolves({ id: "o1", companyId: "c1" });
       await OfferService.deleteOffer("kg", "c1", "o1");
+      expect(
+        ApplicationServiceMock.deleteByOffer.calledWith("kg", "o1"),
+      ).to.equal(true);
       expect(OfferMediaManager.removeByOffer.calledWith("kg", "o1")).to.equal(
         true,
       );

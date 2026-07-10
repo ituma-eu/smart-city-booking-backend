@@ -19,7 +19,23 @@ const INDUSTRY_COLORS = {
   "Wirtschaft, Handel, Verwaltung": "#b3d35a",
 };
 
+// Company-set application statuses (their brand colours drive the badges).
+const STATUS_COLORS = {
+  Neu: "#21b5ea",
+  "In Prüfung": "#d99a00",
+  Eingeladen: "#0e7fa8",
+  Angenommen: "#2e9e5b",
+  Abgesagt: "#c83a3a",
+};
+
 const TERMS_BY_TYPE = {
+  application_status: [
+    "Neu",
+    "In Prüfung",
+    "Eingeladen",
+    "Angenommen",
+    "Abgesagt",
+  ],
   industry: Object.keys(INDUSTRY_COLORS),
   internship_type: [
     "Schulpraktikum",
@@ -78,7 +94,7 @@ module.exports = {
               tenantId: TENANT_ID,
               type,
               name,
-              color: INDUSTRY_COLORS[name] || "",
+              color: INDUSTRY_COLORS[name] || STATUS_COLORS[name] || "",
               active: true,
               sortOrder: i,
             },

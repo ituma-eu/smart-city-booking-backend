@@ -7,6 +7,7 @@ describe("ApplicationService — company inbox + status", () => {
   let ApplicationManager;
   let OfferManager;
   let CompanyBranchManager;
+  let TaxonomyTermManager;
   let ApplicationService;
   const T = "kielregion";
   const CO = "c-1";
@@ -22,6 +23,16 @@ describe("ApplicationService — company inbox + status", () => {
     CompanyBranchManager = {
       getBranchesByCompany: sandbox.stub().resolves([]),
     };
+    TaxonomyTermManager = {
+      getTerms: sandbox
+        .stub()
+        .resolves([
+          { name: "Neu" },
+          { name: "In Prüfung" },
+          { name: "Eingeladen" },
+          { name: "Abgesagt" },
+        ]),
+    };
     mock(
       "../../src/commons/data-managers/application-manager",
       ApplicationManager,
@@ -30,6 +41,10 @@ describe("ApplicationService — company inbox + status", () => {
     mock(
       "../../src/commons/data-managers/company-branch-manager",
       CompanyBranchManager,
+    );
+    mock(
+      "../../src/commons/data-managers/taxonomy-term-manager",
+      TaxonomyTermManager,
     );
     mock("../../src/commons/data-managers/student-manager", {});
     mock("../../src/commons/data-managers/user-manager", {});

@@ -13,6 +13,9 @@ const OfferManager = require("../../data-managers/offer-manager");
 const MemberInvitationManager = require("../../data-managers/member-invitation-manager");
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
 const { CompanyRoleService } = require("./company-role-service");
+const ApplicationService = require("../student/application-service");
+const AccountDeletionService = require("../account-deletion-service");
+const JwtHelper = require("../../utilities/jwt-helper");
 const MailController = require("../../mail-service/mail-controller");
 const { isEmail, isURL } = require("validator");
 
@@ -826,6 +829,72 @@ class CompanyService {
       return { removed: userId };
     }
     throw { message: "Member not found", status: 404 };
+  }
+
+  static async deleteOwnerAccount(tenantId, companyId, callerUserId, reason) {
+    const userId = String(callerUserId || "")
+      .trim()
+      .toLowerCase();
+    const company = await CompanyManager.getCompany(tenantId, companyId);
+    if (!company) {
+      throw { message: "Company not found", status: 404 };
+    }
+    const caller = await CompanyMemberManager.getMemberByUser(tenantId, userId);
+    if (!caller || caller.companyId !== companyId || caller.isOwner !== true) {
+      throw {
+        message: "Only the company owner can delete the account",
+        status: 403,
+      };
+    }
+    const reasonId = await AccountDeletionService.assertValidReason(
+      tenantId,
+      "company",
+      reason,
+    );
+
+    // Deletion is not automatic: the owner must first remove every team member,
+    // pending invitation, branch and internship. Only the emptied company shell
+    // (plus any residual applications) is torn down here.
+    const members = await CompanyMemberManager.getMembersByCompany(
+      tenantId,
+      companyId,
+    );
+    const invitations = await MemberInvitationManager.getPendingByCompany(
+      tenantId,
+      companyId,
+    );
+    const branches = await CompanyBranchManager.getBranchesByCompany(
+      tenantId,
+      companyId,
+    );
+    const offers = await OfferManager.getOffersByCompany(tenantId, companyId);
+    const memberCount =
+      members.filter((m) => m.isOwner !== true).length + invitations.length;
+    const branchCount = branches.length;
+    const offerCount = offers.length;
+    if (memberCount > 0 || branchCount > 0 || offerCount > 0) {
+      throw {
+        message:
+          "Please remove your team members, branches and internships before deleting the account",
+        status: 409,
+        memberCount,
+        branchCount,
+        offerCount,
+      };
+    }
+
+    await ApplicationService.deleteByCompany(tenantId, companyId);
+    await CompanyManager.deleteCompany(tenantId, companyId);
+    await CompanyMemberManager.removeMember(tenantId, companyId, userId);
+    // Count only once the company is actually gone, so a retry cannot double-count.
+    await AccountDeletionService.increment(tenantId, "company", reasonId);
+    await MembershipManager.removeMembership(tenantId, userId);
+    await JwtHelper.revokeAllUserTokens(userId, "account_deleted");
+    const remaining = await MembershipManager.getMembershipsByUserID(userId);
+    if (!remaining || remaining.length === 0) {
+      await UserManager.deleteUser(userId);
+    }
+    return { deleted: userId };
   }
 
   static async acceptMemberInvitation(tenantId, token, password) {

@@ -5,6 +5,7 @@ const sinon = require("sinon");
 describe("PlatformSettingsService", () => {
   let sandbox;
   let PlatformSettingsManager;
+  let TaxonomyTermManager;
   let PlatformSettingsService;
 
   beforeEach(() => {
@@ -13,9 +14,24 @@ describe("PlatformSettingsService", () => {
       getByTenant: sandbox.stub().resolves(null),
       store: sandbox.stub().callsFake(async (s) => s),
     };
+    TaxonomyTermManager = {
+      getTerms: sandbox
+        .stub()
+        .resolves([
+          { name: "Neu" },
+          { name: "In Prüfung" },
+          { name: "Eingeladen" },
+          { name: "Angenommen" },
+          { name: "Abgesagt" },
+        ]),
+    };
     mock(
       "../../src/commons/data-managers/platform-settings-manager",
       PlatformSettingsManager,
+    );
+    mock(
+      "../../src/commons/data-managers/taxonomy-term-manager",
+      TaxonomyTermManager,
     );
     PlatformSettingsService = mock.reRequire(
       "../../src/commons/services/platform-settings-service",
@@ -80,6 +96,26 @@ describe("PlatformSettingsService", () => {
         directPublishVerified: "true",
       });
       expect(s.directPublishVerified).to.equal(true);
+    });
+
+    it("accepts a defaultApplicationStatus present in the taxonomy", async () => {
+      const s = await PlatformSettingsService.updateSettings("kielregion", {
+        defaultApplicationStatus: "Angenommen",
+      });
+      expect(s.defaultApplicationStatus).to.equal("Angenommen");
+    });
+
+    it("rejects a defaultApplicationStatus not in the taxonomy (400)", async () => {
+      let err;
+      try {
+        await PlatformSettingsService.updateSettings("kielregion", {
+          defaultApplicationStatus: "Bogus",
+        });
+      } catch (e) {
+        err = e;
+      }
+      expect(err).to.not.equal(undefined);
+      expect(err.status).to.equal(400);
     });
   });
 });

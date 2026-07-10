@@ -4,9 +4,11 @@ const OfferManager = require("../../data-managers/offer-manager");
 const StudentManager = require("../../data-managers/student-manager");
 const UserManager = require("../../data-managers/user-manager");
 const CompanyBranchManager = require("../../data-managers/company-branch-manager");
+const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
+const PlatformSettingsService = require("../platform-settings-service");
+const { NextcloudManager } = require("../../data-managers/file-manager");
 
 const MOTIVATION_MAX = 5000;
-const APPLICATION_STATUSES = ["Neu", "In Prüfung", "Eingeladen", "Abgesagt"];
 
 function deriveAge(birthDate) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(birthDate || "")) {
@@ -39,7 +41,7 @@ function toDocDto(tenantId, applicationId, doc) {
   };
 }
 
-function toListDto(application, offer) {
+function toListDto(tenantId, application, offer) {
   return {
     id: application.id,
     offerId: application.offerId,
@@ -53,6 +55,9 @@ function toListDto(application, offer) {
           companyId: offer.companyId,
         }
       : null,
+    documents: (application.documents || []).map((doc) =>
+      toDocDto(tenantId, application.id, doc),
+    ),
   };
 }
 
@@ -136,6 +141,9 @@ class ApplicationService {
       throw { message: "User not found", status: 404 };
     }
 
+    const settings = await PlatformSettingsService.getSettings(tenantId);
+    const initialStatus = settings.defaultApplicationStatus || "Neu";
+
     const now = Date.now();
     let application;
     try {
@@ -154,7 +162,7 @@ class ApplicationService {
         motivation,
         consent: true,
         consentAt: now,
-        status: "Neu",
+        status: initialStatus,
         documents: [],
         created: now,
       });
@@ -185,7 +193,7 @@ class ApplicationService {
     );
     const byId = new Map(offers.map((offer) => [offer.id, offer]));
     return applications.map((application) =>
-      toListDto(application, byId.get(application.offerId) || null),
+      toListDto(tenantId, application, byId.get(application.offerId) || null),
     );
   }
 
@@ -229,7 +237,10 @@ class ApplicationService {
     status,
     branchScope,
   ) {
-    if (!APPLICATION_STATUSES.includes(status)) {
+    const statusTerms = await TaxonomyTermManager.getTerms(tenantId, {
+      type: "application_status",
+    });
+    if (!statusTerms.some((term) => term.name === status)) {
       throw { message: "Invalid status", status: 400 };
     }
     const application = await ApplicationManager.getById(
@@ -270,6 +281,50 @@ class ApplicationService {
       documentId,
     );
     return { removed: documentId };
+  }
+
+  // Completely removes every application for an offer, including the uploaded
+  // document files on Nextcloud. Used when a company deletes a praktikum.
+  static async deleteByOffer(tenantId, offerId) {
+    const applications = await ApplicationManager.getByOffer(tenantId, offerId);
+    await ApplicationService._deleteDocumentFiles(tenantId, applications);
+    await ApplicationManager.removeByOffer(tenantId, offerId);
+    return { removed: applications.length };
+  }
+
+  // Same, for every application belonging to a company (owner account deletion).
+  static async deleteByCompany(tenantId, companyId) {
+    const applications = await ApplicationManager.getByCompany(
+      tenantId,
+      companyId,
+    );
+    await ApplicationService._deleteDocumentFiles(tenantId, applications);
+    await ApplicationManager.removeByCompany(tenantId, companyId);
+    return { removed: applications.length };
+  }
+
+  // Same, for every application a student submitted (student account deletion).
+  static async deleteByStudent(tenantId, studentUserId) {
+    const applications = await ApplicationManager.listByUser(
+      tenantId,
+      studentUserId,
+    );
+    await ApplicationService._deleteDocumentFiles(tenantId, applications);
+    await ApplicationManager.removeByStudent(tenantId, studentUserId);
+    return { removed: applications.length };
+  }
+
+  static async _deleteDocumentFiles(tenantId, applications) {
+    for (const application of applications) {
+      for (const doc of application.documents || []) {
+        try {
+          await NextcloudManager.deleteFile(tenantId, doc.fileName);
+        } catch {
+          // Best effort: a missing or unreachable file must not abort the
+          // deletion cascade; the database records are the source of truth.
+        }
+      }
+    }
   }
 
   static documentDtos(tenantId, applicationId, documents) {

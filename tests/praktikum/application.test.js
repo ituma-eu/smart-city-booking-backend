@@ -9,6 +9,7 @@ describe("ApplicationService — submitApplication", () => {
   let UserManager;
   let ApplicationManager;
   let ApplicationService;
+  let PlatformSettingsService;
 
   const tenantId = "kielregion";
   const userId = "lena@example.de";
@@ -56,6 +57,13 @@ describe("ApplicationService — submitApplication", () => {
       "../../src/commons/data-managers/application-manager",
       ApplicationManager,
     );
+    PlatformSettingsService = {
+      getSettings: sandbox.stub().resolves({ defaultApplicationStatus: "Neu" }),
+    };
+    mock(
+      "../../src/commons/services/platform-settings-service",
+      PlatformSettingsService,
+    );
     ApplicationService = mock.reRequire(
       "../../src/commons/services/student/application-service",
     );
@@ -91,6 +99,20 @@ describe("ApplicationService — submitApplication", () => {
     expect(stored.status).to.equal("Neu");
     expect(stored.documents).to.deep.equal([]);
     expect(res.id).to.be.a("string").and.to.have.length.greaterThan(0);
+  });
+
+  it("uses the default application status configured in the platform settings", async () => {
+    PlatformSettingsService.getSettings.resolves({
+      defaultApplicationStatus: "In Prüfung",
+    });
+    await ApplicationService.submitApplication(
+      tenantId,
+      userId,
+      offerId,
+      validPayload,
+    );
+    const stored = ApplicationManager.storeApplication.firstCall.args[0];
+    expect(stored.status).to.equal("In Prüfung");
   });
 
   it("→ 403 when the caller is not a student", async () => {
@@ -293,6 +315,7 @@ describe("ApplicationService — listMyApplications", () => {
         status: "Neu",
         createdAt: 111,
         offer: { id: "o-1", title: "IT", city: "Kiel", companyId: "c-1" },
+        documents: [],
       },
       {
         id: "a-2",
@@ -300,6 +323,7 @@ describe("ApplicationService — listMyApplications", () => {
         status: "Eingeladen",
         createdAt: 222,
         offer: null,
+        documents: [],
       },
     ]);
   });
