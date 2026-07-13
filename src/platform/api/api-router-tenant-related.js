@@ -15,9 +15,383 @@ const { TenantController } = require("./controllers/tenant-controller");
 const {
   GroupBookingController,
 } = require("./controllers/group-booking-controller");
+const CompanyController = require("./controllers/company-controller");
+const SettingsController = require("./controllers/settings-controller");
+const OfferController = require("./controllers/offer-controller");
+const TaxonomyController = require("./controllers/taxonomy-controller");
+const PostController = require("./controllers/post-controller");
+const StudentController = require("./controllers/student-controller");
+const AccountDeletionController = require("./controllers/account-deletion-controller");
+const ApplicationController = require("./controllers/application-controller");
 const { optionalAuth } = require("../../middleware/auth-middleware");
 
 const router = express.Router({ mergeParams: true });
+
+// COMPANIES
+// =========
+
+router.post("/companies/register", CompanyController.register);
+router.post(
+  "/companies/resend-verification",
+  CompanyController.resendVerification,
+);
+
+// STUDENTS
+// ========
+
+router.post("/students/register", StudentController.register);
+router.post(
+  "/students/resend-verification",
+  StudentController.resendVerification,
+);
+router.get(
+  "/students/me",
+  AuthenticationController.isSignedIn,
+  StudentController.getMe,
+);
+router.put(
+  "/students/me",
+  AuthenticationController.isSignedIn,
+  StudentController.updateMe,
+);
+router.delete(
+  "/students/me",
+  AuthenticationController.isSignedIn,
+  StudentController.deleteMe,
+);
+router.get(
+  "/students/me/bookmarks",
+  AuthenticationController.isSignedIn,
+  StudentController.getBookmarks,
+);
+router.post(
+  "/students/me/bookmarks",
+  AuthenticationController.isSignedIn,
+  StudentController.addBookmark,
+);
+router.delete(
+  "/students/me/bookmarks/:offerId",
+  AuthenticationController.isSignedIn,
+  StudentController.removeBookmark,
+);
+router.get(
+  "/admin/account-deletions",
+  AuthenticationController.isSignedIn,
+  AccountDeletionController.getStats,
+);
+router.get(
+  "/students/me/applications",
+  AuthenticationController.isSignedIn,
+  ApplicationController.listMine,
+);
+router.get(
+  "/companies",
+  AuthenticationController.isSignedIn,
+  CompanyController.getCompanies,
+);
+router.get(
+  "/companies/mine",
+  AuthenticationController.isSignedIn,
+  CompanyController.getMyCompany,
+);
+router.get(
+  "/me/context",
+  AuthenticationController.isSignedIn,
+  CompanyController.getMyContext,
+);
+router.get(
+  "/companies/:id",
+  AuthenticationController.isSignedIn,
+  CompanyController.getCompany,
+);
+router.get("/companies/:id/public", CompanyController.getPublicCompany);
+router.put(
+  "/companies/:id",
+  AuthenticationController.isSignedIn,
+  CompanyController.updateProfile,
+);
+router.delete(
+  "/companies/:id",
+  AuthenticationController.isSignedIn,
+  CompanyController.deleteAccount,
+);
+router.post(
+  "/companies/:id/logo",
+  AuthenticationController.isSignedIn,
+  CompanyController.uploadLogo,
+);
+router.delete(
+  "/companies/:id/logo",
+  AuthenticationController.isSignedIn,
+  CompanyController.removeLogo,
+);
+router.get(
+  "/companies/:id/media",
+  AuthenticationController.isSignedIn,
+  CompanyController.listMedia,
+);
+router.post(
+  "/companies/:id/media",
+  AuthenticationController.isSignedIn,
+  CompanyController.uploadMedia,
+);
+router.delete(
+  "/companies/:id/media/:mediaId",
+  AuthenticationController.isSignedIn,
+  CompanyController.removeMedia,
+);
+router.get(
+  "/companies/:id/branches",
+  AuthenticationController.isSignedIn,
+  CompanyController.listBranches,
+);
+router.post(
+  "/companies/:id/branches",
+  AuthenticationController.isSignedIn,
+  CompanyController.createBranch,
+);
+router.get(
+  "/companies/:id/branches/:branchId",
+  AuthenticationController.isSignedIn,
+  CompanyController.getBranch,
+);
+router.put(
+  "/companies/:id/branches/:branchId",
+  AuthenticationController.isSignedIn,
+  CompanyController.updateBranch,
+);
+router.delete(
+  "/companies/:id/branches/:branchId",
+  AuthenticationController.isSignedIn,
+  CompanyController.removeBranch,
+);
+router.post(
+  "/companies/:id/branches/:branchId/logo",
+  AuthenticationController.isSignedIn,
+  CompanyController.uploadBranchLogo,
+);
+router.delete(
+  "/companies/:id/branches/:branchId/logo",
+  AuthenticationController.isSignedIn,
+  CompanyController.removeBranchLogo,
+);
+router.post(
+  "/companies/:id/members/invite",
+  AuthenticationController.isSignedIn,
+  CompanyController.inviteMember,
+);
+router.get(
+  "/companies/:id/members",
+  AuthenticationController.isSignedIn,
+  CompanyController.listMembers,
+);
+router.delete(
+  "/companies/:id/members/:userId",
+  AuthenticationController.isSignedIn,
+  CompanyController.removeMember,
+);
+router.post(
+  "/member-invitations/:token/accept",
+  CompanyController.acceptInvitation,
+);
+router.post(
+  "/companies/:id/verify",
+  AuthenticationController.isSignedIn,
+  CompanyController.verify,
+);
+router.post(
+  "/companies/:id/block",
+  AuthenticationController.isSignedIn,
+  CompanyController.block,
+);
+
+// TAXONOMIES
+// ==========
+
+router.get("/taxonomies", TaxonomyController.getTaxonomies);
+
+// POSTS / INFOS (CMS)
+// ==================
+
+router.get("/posts", PostController.list);
+router.get("/post-tags", PostController.tags);
+router.get("/posts/:slug", PostController.getBySlug);
+router.get(
+  "/admin/posts",
+  AuthenticationController.isSignedIn,
+  PostController.adminList,
+);
+router.post(
+  "/admin/posts",
+  AuthenticationController.isSignedIn,
+  PostController.create,
+);
+router.put(
+  "/admin/posts/:id",
+  AuthenticationController.isSignedIn,
+  PostController.update,
+);
+router.post(
+  "/admin/posts/:id/publish",
+  AuthenticationController.isSignedIn,
+  PostController.publish,
+);
+router.post(
+  "/admin/posts/:id/unpublish",
+  AuthenticationController.isSignedIn,
+  PostController.unpublish,
+);
+router.delete(
+  "/admin/posts/:id",
+  AuthenticationController.isSignedIn,
+  PostController.remove,
+);
+router.get(
+  "/me/company-posts",
+  AuthenticationController.isSignedIn,
+  PostController.companyList,
+);
+router.post(
+  "/admin/posts/:id/thumbnail",
+  AuthenticationController.isSignedIn,
+  PostController.uploadThumbnail,
+);
+router.delete(
+  "/admin/posts/:id/thumbnail",
+  AuthenticationController.isSignedIn,
+  PostController.removeThumbnail,
+);
+router.post(
+  "/admin/posts/:id/attachments",
+  AuthenticationController.isSignedIn,
+  PostController.uploadAttachment,
+);
+router.delete(
+  "/admin/posts/:id/attachments/:attId",
+  AuthenticationController.isSignedIn,
+  PostController.removeAttachment,
+);
+
+// SETTINGS
+// ========
+
+router.get("/settings", SettingsController.getSettings);
+router.put(
+  "/settings",
+  AuthenticationController.isSignedIn,
+  SettingsController.updateSettings,
+);
+
+// OFFERS / PRAKTIKA
+// =================
+
+// public
+router.get("/offers", OfferController.searchOffers);
+router.get("/offers/:offerId/public", OfferController.getPublicOffer);
+router.post(
+  "/offers/:offerId/applications",
+  AuthenticationController.isSignedIn,
+  ApplicationController.submit,
+);
+router.get(
+  "/companies/:id/applications",
+  AuthenticationController.isSignedIn,
+  ApplicationController.listForCompany,
+);
+router.put(
+  "/companies/:id/applications/:applicationId/status",
+  AuthenticationController.isSignedIn,
+  ApplicationController.updateStatus,
+);
+router.post(
+  "/applications/:id/documents",
+  AuthenticationController.isSignedIn,
+  ApplicationController.uploadDocument,
+);
+router.get(
+  "/applications/:id/documents",
+  AuthenticationController.isSignedIn,
+  ApplicationController.listDocuments,
+);
+router.get(
+  "/applications/:id/documents/:docId/download",
+  AuthenticationController.isSignedIn,
+  ApplicationController.downloadDocument,
+);
+router.delete(
+  "/applications/:id/documents/:docId",
+  AuthenticationController.isSignedIn,
+  ApplicationController.removeDocument,
+);
+
+// moderation (admin)
+router.get(
+  "/admin/offers",
+  AuthenticationController.isSignedIn,
+  OfferController.listModeration,
+);
+router.post(
+  "/offers/:offerId/approve",
+  AuthenticationController.isSignedIn,
+  OfferController.approveOffer,
+);
+router.post(
+  "/offers/:offerId/reject",
+  AuthenticationController.isSignedIn,
+  OfferController.rejectOffer,
+);
+router.post(
+  "/offers/:offerId/deactivate",
+  AuthenticationController.isSignedIn,
+  OfferController.deactivateOffer,
+);
+
+// company-side
+router.get(
+  "/companies/:id/stats",
+  AuthenticationController.isSignedIn,
+  OfferController.getStats,
+);
+router.get(
+  "/companies/:id/offers",
+  AuthenticationController.isSignedIn,
+  OfferController.listOffers,
+);
+router.post(
+  "/companies/:id/offers",
+  AuthenticationController.isSignedIn,
+  OfferController.createOffer,
+);
+router.get(
+  "/companies/:id/offers/:offerId",
+  AuthenticationController.isSignedIn,
+  OfferController.getOffer,
+);
+router.put(
+  "/companies/:id/offers/:offerId",
+  AuthenticationController.isSignedIn,
+  OfferController.updateOffer,
+);
+router.delete(
+  "/companies/:id/offers/:offerId",
+  AuthenticationController.isSignedIn,
+  OfferController.deleteOffer,
+);
+router.get(
+  "/companies/:id/offers/:offerId/media",
+  AuthenticationController.isSignedIn,
+  OfferController.listMedia,
+);
+router.post(
+  "/companies/:id/offers/:offerId/media",
+  AuthenticationController.isSignedIn,
+  OfferController.uploadMedia,
+);
+router.delete(
+  "/companies/:id/offers/:offerId/media/:mediaId",
+  AuthenticationController.isSignedIn,
+  OfferController.removeMedia,
+);
 
 // BOOKABLES
 // =========
