@@ -13,7 +13,10 @@ const {
   getBookingDurationHours,
   hasBookingPermission,
   isWithinMaxBookingAdvance,
+  isWithinMinBookingLeadTime,
   CAPACITY_MODES,
+  isBlockPeriodBookingValid,
+  isTimePeriodBookingValid,
 } = require("./availability-rules");
 
 const logger = bunyan.createLogger({
@@ -401,6 +404,46 @@ function runBookingDurationCheck({ originBookable, timeBegin, timeEnd }) {
 
 /**
  * @param {Object} params
+ * @returns {Object}
+ */
+function runBlockPeriodCheck({ originBookable, timeBegin, timeEnd }) {
+  if (!originBookable?.isBlockPeriodRelated) {
+    return { checkType: CHECK_TYPES.BLOCK_PERIOD, available: true };
+  }
+
+  if (!isBlockPeriodBookingValid(originBookable, timeBegin, timeEnd)) {
+    throw {
+      checkType: CHECK_TYPES.BLOCK_PERIOD,
+      available: false,
+      message: `Für das Objekt ${originBookable.title} muss eine vollständige Block-Periode gebucht werden.`,
+    };
+  }
+
+  return { checkType: CHECK_TYPES.BLOCK_PERIOD, available: true };
+}
+
+/**
+ * @param {Object} params
+ * @returns {Object}
+ */
+function runTimePeriodCheck({ originBookable, timeBegin, timeEnd }) {
+  if (!originBookable?.isTimePeriodRelated) {
+    return { checkType: CHECK_TYPES.TIME_PERIOD, available: true };
+  }
+
+  if (!isTimePeriodBookingValid(originBookable, timeBegin, timeEnd)) {
+    throw {
+      checkType: CHECK_TYPES.TIME_PERIOD,
+      available: false,
+      message: `Für das Objekt ${originBookable.title} muss ein vollständiger Zeitslot gebucht werden.`,
+    };
+  }
+
+  return { checkType: CHECK_TYPES.TIME_PERIOD, available: true };
+}
+
+/**
+ * @param {Object} params
  * @returns {Promise<Object>}
  */
 async function runEventDateCheck({ provider, originBookable }) {
@@ -458,6 +501,26 @@ async function runMaxBookingDateCheck({ provider, originBookable, timeBegin }) {
   };
 }
 
+/**
+ * @param {Object} params
+ * @returns {Promise<Object>}
+ */
+async function runMinBookingLeadTimeCheck({ originBookable, timeBegin }) {
+  if (isWithinMinBookingLeadTime(timeBegin, originBookable)) {
+    return { checkType: CHECK_TYPES.INSUFFICIENT_LEAD_TIME, available: true };
+  }
+
+  const preparationLeadTimeMinutes = Number(
+    originBookable.preparationLeadTimeMinutes,
+  );
+
+  throw {
+    checkType: CHECK_TYPES.INSUFFICIENT_LEAD_TIME,
+    available: false,
+    message: `Die Buchung für das Objekt ${originBookable.title} erfordert eine Vorbereitungszeit von ${preparationLeadTimeMinutes} Minuten innerhalb der Servicezeiten.`,
+  };
+}
+
 module.exports = {
   getBookedAmountForBookableWindow,
   runPermissionCheck,
@@ -466,6 +529,9 @@ module.exports = {
   runChildBookingsCheck,
   runEventSeatsCheck,
   runBookingDurationCheck,
+  runBlockPeriodCheck,
+  runTimePeriodCheck,
   runEventDateCheck,
   runMaxBookingDateCheck,
+  runMinBookingLeadTimeCheck,
 };

@@ -3,14 +3,16 @@ const {
     generateTimePeriodsFromMaxBookingAdvance,
     generateTimePeriodsFromOpeningHours,
     generateTimePeriodsFromTimePeriods,
+    generateTimePeriodsFromBlockPeriods,
     generateTimePeriodsFromSpecialOpeningHours,
     getUnavailablePeriods,
     mergePeriods,
   },
 } = require("./calendar-service");
 const {
-  AvailabilityContext,
-} = require("./availability/availability-context");
+  isBlockPeriodBookable,
+} = require("../utilities/block-period-generator");
+const { AvailabilityContext } = require("./availability/availability-context");
 const {
   computeWindowAvailability,
 } = require("./availability/capacity-interval-calculator");
@@ -25,6 +27,9 @@ const {
 const {
   applyBookingDurationRules,
 } = require("./availability/availability-duration-filter");
+const {
+  generateLeadTimeBlockedPeriods,
+} = require("../availability/lead-time-calculator");
 const { NotFoundError } = require("../../errors/BaseError");
 const bunyan = require("bunyan");
 
@@ -119,24 +124,25 @@ class CalendarServiceV2 {
     }
 
     const maxBookingAdvanceInMonths = context.tenant?.maxBookingAdvanceInMonths;
+    const blockPeriodBookable = isBlockPeriodBookable(bookable);
 
-    const availableOpeningHoursPeriods = generateTimePeriodsFromOpeningHours(
-      startDate,
-      endDate,
-      [bookable, ...context.parentBookables],
-    );
+    const availableOpeningHoursPeriods = blockPeriodBookable
+      ? []
+      : generateTimePeriodsFromOpeningHours(startDate, endDate, [
+          bookable,
+          ...context.parentBookables,
+        ]);
 
-    const availableTimePeriods = generateTimePeriodsFromTimePeriods(
-      startDate,
-      endDate,
-      bookable,
-    );
+    const availableTimePeriods = blockPeriodBookable
+      ? generateTimePeriodsFromBlockPeriods(startDate, endDate, bookable)
+      : generateTimePeriodsFromTimePeriods(startDate, endDate, bookable);
 
-    const availableSpecialOpeningHoursPeriods =
-      generateTimePeriodsFromSpecialOpeningHours(startDate, endDate, [
-        bookable,
-        ...context.parentBookables,
-      ]);
+    const availableSpecialOpeningHoursPeriods = blockPeriodBookable
+      ? []
+      : generateTimePeriodsFromSpecialOpeningHours(startDate, endDate, [
+          bookable,
+          ...context.parentBookables,
+        ]);
 
     const maxBookingAdvancePeriods = generateTimePeriodsFromMaxBookingAdvance(
       startDate,
@@ -149,6 +155,12 @@ class CalendarServiceV2 {
       availableSpecialOpeningHoursPeriods,
       availableTimePeriods,
       maxBookingAdvancePeriods,
+    );
+
+    const leadTimeBlockedPeriods = generateLeadTimeBlockedPeriods(
+      startDate,
+      endDate,
+      bookable,
     );
 
     const items = [];
@@ -174,12 +186,19 @@ class CalendarServiceV2 {
       items.push(...capacitySegments);
     }
 
-    const closedPeriods = getUnavailablePeriods(
-      availableOpeningHoursPeriods,
-      availableSpecialOpeningHoursPeriods,
-    );
+    const closedPeriods = blockPeriodBookable
+      ? []
+      : getUnavailablePeriods(
+          availableOpeningHoursPeriods,
+          availableSpecialOpeningHoursPeriods,
+        );
     items.push(
       ...closedPeriods.map((period) => ({
+        timeBegin: period.start,
+        timeEnd: period.end,
+        available: false,
+      })),
+      ...leadTimeBlockedPeriods.map((period) => ({
         timeBegin: period.start,
         timeEnd: period.end,
         available: false,
