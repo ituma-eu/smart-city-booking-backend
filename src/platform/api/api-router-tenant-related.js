@@ -659,6 +659,11 @@ router.post(
   AuthenticationController.isSignedIn,
   GroupBookingController.createGroupBookingReceipt,
 );
+router.post(
+  "/group-bookings/:id/invoice",
+  AuthenticationController.isSignedIn,
+  GroupBookingController.createGroupBookingInvoice,
+);
 
 // CHECKOUT
 // ========

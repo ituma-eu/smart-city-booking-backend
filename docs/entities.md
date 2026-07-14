@@ -262,7 +262,7 @@ Example:
   "permittedRoles": ["role1", "role2"],
   "freeBookingUsers": ["user3"],
   "freeBookingRoles": ["role3"],
-  "cancellationPolicy": { "userCancellable": true },
+  "cancellationPolicy": { "userCancellable": true, "contactHint": "" },
 
   "relatedBookableIds": ["bookable1", "bookable2"],
   "checkoutBookableIds": [{ "bookableId": "bookable2", "mandatory": false }],
@@ -316,8 +316,8 @@ Key fields of a bookable:
 | timePeriods           | Weekly repeating time windows when the bookable can be used.                                                                                               |
 | isOpeningHoursRelated | If `true`, availability is derived from `openingHours`.                                                                                                     |
 | openingHours          | Regular opening hours per weekday.                                                                                                                          |
-| preparationLeadTimeMinutes | Minimum preparation time in minutes before booking start. Lead-time enforcement is active only when `isScheduleRelated` is `true`, `preparationLeadTimeMinutes` is greater than `0`, and `serviceHours` is non-empty. |
-| serviceHours          | Service windows when preparation can take place (same structure as `openingHours`, independent of opening hours). Only evaluated together with `preparationLeadTimeMinutes` on schedule-related bookables. |
+| preparationLeadTimeMinutes | Minimum preparation time in minutes before booking start. Lead-time enforcement is active when `isScheduleRelated`, `isTimePeriodRelated`, or `isBlockPeriodRelated` is `true`, `preparationLeadTimeMinutes` is greater than `0`, and `serviceHours` is non-empty. |
+| serviceHours          | Service windows when preparation can take place (same structure as `openingHours`, independent of opening hours). Only evaluated together with `preparationLeadTimeMinutes` on schedule-, time-period-, and block-period-related bookables. |
 | bufferTimeBeforeMinutes | Optional capacity buffer before each booking (minutes). Active only when `isScheduleRelated` is `true` and value is greater than `0`. Blocks back-to-back bookings in calendar and checkout capacity checks. |
 | bufferTimeAfterMinutes | Optional capacity buffer after each booking (minutes). Active only when `isScheduleRelated` is `true` and value is greater than `0`. |
 | isSpecialOpeningHoursRelated | If `true`, `specialOpeningHours` override the regular opening hours for specific dates.                                                              |
@@ -335,7 +335,7 @@ Key fields of a bookable:
 | relatedBookableIds    | IDs of bookables related to this bookable.                                                                                                                 |
 | checkoutBookableIds   | Additional bookables for checkout: `{ bookableId, mandatory }`.                                                                                          |
 | requiresLogin         | If `true`, only authenticated users may book.                                                                                                              |
-| cancellationPolicy    | e.g. `{ userCancellable: true }` — whether users can cancel bookings themselves.                                                                           |
+| cancellationPolicy    | e.g. `{ userCancellable: true, contactHint: "" }` — whether users can cancel bookings themselves; `contactHint` is an optional message shown in emails when user cancellation is disabled.                                                                           |
 | permittedUsers        | List of user IDs that are allowed to book. If empty, every user including guests may book (depending on other rules).                                     |
 | permittedRoles        | List of role IDs that are allowed to book. If empty, every user including guests may book (depending on other rules).                                     |
 | freeBookingUsers      | Users who can book this bookable for free.                                                                                                                 |
@@ -388,7 +388,7 @@ Example:
   "vatIncludedEur": 19,
   "_couponUsed": {},
   "customFieldValues": [],
-  "cancellationPolicy": { "userCancellable": true },
+  "cancellationPolicy": { "userCancellable": true, "contactHint": "" },
   "hooks": []
 }
 ```

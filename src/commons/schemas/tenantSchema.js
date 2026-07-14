@@ -35,12 +35,27 @@ const tenantSchemaDefinition = {
   cancellationCount: { type: Object, default: {} },
   cancellationTemplate: { type: String, default: "" },
   cancellationNumberPrefix: { type: String, default: "" },
+  pdfBookingLayout: {
+    type: String,
+    enum: ["summary", "compact", "detailed"],
+    default: "detailed",
+  },
+  pdfBookingTableMeta: {
+    type: Object,
+    default: () => ({
+      showBookingId: true,
+      showBookingPeriod: true,
+      showPaymentDate: true,
+      showPaymentMethod: true,
+    }),
+  },
   paymentPurposeSuffix: { type: String, default: "" },
   applications: { type: Array, default: [] },
   maxBookingAdvanceInMonths: { type: Number, default: null },
   defaultEventCreationMode: { type: String, default: "" },
   enablePublicStatusView: { type: Boolean, default: false },
   notifyOnNewBooking: { type: Boolean, default: true },
+  notifySupervisorsOnBooking: { type: Boolean, default: false },
   catalogParticipation: {
     type: Object,
     default: {
