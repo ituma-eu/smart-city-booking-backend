@@ -158,6 +158,14 @@ class OfferController {
       ) {
         return response.sendStatus(403);
       }
+      if (
+        existing.status === "Archiv" &&
+        !(await CompanyController.isTenantAdmin(request.user.id, tenantId))
+      ) {
+        return response
+          .status(403)
+          .send("Archived offers can only be changed by an admin");
+      }
       const offer = await OfferService.updateOffer(
         tenantId,
         companyId,
@@ -189,6 +197,14 @@ class OfferController {
       ) {
         return response.sendStatus(403);
       }
+      if (
+        existing.status === "Archiv" &&
+        !(await CompanyController.isTenantAdmin(request.user.id, tenantId))
+      ) {
+        return response
+          .status(403)
+          .send("Archived offers can only be changed by an admin");
+      }
       const media = await OfferService.listOfferMedia(tenantId, offerId);
       const result = await OfferService.deleteOffer(
         tenantId,
@@ -201,6 +217,36 @@ class OfferController {
       return response.status(200).send(result);
     } catch (error) {
       return OfferController._fail(response, error, "Could not delete offer");
+    }
+  }
+
+  static async archiveOffer(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      const companyId = request.params.id;
+      const offerId = request.params.offerId;
+      const existing = await OfferManager.getOffer(tenantId, offerId);
+      if (!existing || existing.companyId !== companyId) {
+        return response.sendStatus(404);
+      }
+      if (
+        !(await CompanyController.canEditBranch(
+          request.user.id,
+          tenantId,
+          companyId,
+          existing.branchId,
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
+      const offer = await OfferService.archiveOffer(
+        tenantId,
+        companyId,
+        offerId,
+      );
+      return response.status(200).send(offer);
+    } catch (error) {
+      return OfferController._fail(response, error, "Could not archive offer");
     }
   }
 
@@ -339,6 +385,26 @@ class OfferController {
     }
   }
 
+  static async reactivateOffer(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const offer = await OfferService.reactivateOffer(
+        tenantId,
+        request.params.offerId,
+      );
+      return response.status(200).send(offer);
+    } catch (error) {
+      return OfferController._fail(
+        response,
+        error,
+        "Could not reactivate offer",
+      );
+    }
+  }
+
   static async _deleteMediaFile(tenantId, media) {
     await deleteFileByUrl(tenantId, media && media.url);
   }
@@ -424,13 +490,11 @@ class OfferController {
       }
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const bareName = `${offerId}-${uuidv4()}-${safeName}`;
-      await NextcloudManager.createFile(
-        tenantId,
-        file.data,
-        bareName,
-        "public",
-        "public/offer-media",
-      );
+      await NextcloudManager.createFile({
+        tenantID: tenantId,
+        file: { name: bareName, data: file.data },
+        subFolder: "public/offer-media",
+      });
       const fileName = `public/offer-media/${bareName}`;
       const url = `${process.env.BACKEND_URL}/api/${tenantId}/files/get?name=/${fileName}`;
       const media = await OfferService.addOfferMedia(tenantId, offerId, {

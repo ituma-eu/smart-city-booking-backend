@@ -297,13 +297,11 @@ class CompanyController {
       }
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const fileName = `${companyId}-${safeName}`;
-      await NextcloudManager.createFile(
-        tenantId,
-        file.data,
-        fileName,
-        "public",
-        "public/logos",
-      );
+      await NextcloudManager.createFile({
+        tenantID: tenantId,
+        file: { name: fileName, data: file.data },
+        subFolder: "public/logos",
+      });
       const logoUrl = `${process.env.BACKEND_URL}/api/${tenantId}/files/get?name=/public/logos/${encodeURIComponent(fileName)}`;
       const company = await CompanyService.setCompanyLogo(
         tenantId,
@@ -408,13 +406,11 @@ class CompanyController {
       }
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const bareName = `${companyId}-${uuidv4()}-${safeName}`;
-      await NextcloudManager.createFile(
-        tenantId,
-        file.data,
-        bareName,
-        "public",
-        "public/media",
-      );
+      await NextcloudManager.createFile({
+        tenantID: tenantId,
+        file: { name: bareName, data: file.data },
+        subFolder: "public/media",
+      });
       const fileName = `public/media/${bareName}`;
       const url = `${process.env.BACKEND_URL}/api/${tenantId}/files/get?name=/${fileName}`;
       const type = isVideo ? "video" : "image";
@@ -493,6 +489,61 @@ class CompanyController {
     } catch (error) {
       logger.error("Could not block company", error);
       return sendError(response, error, "Could not block company");
+    }
+  }
+
+  static async unverify(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const company = await CompanyService.unverifyCompany(
+        tenantId,
+        request.params.id,
+      );
+      return response.status(200).send(CompanyController._withLatLng(company));
+    } catch (error) {
+      logger.error("Could not unverify company", error);
+      return sendError(response, error, "Could not unverify company");
+    }
+  }
+
+  static async adminCreate(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const result = await CompanyService.adminCreateCompany(
+        tenantId,
+        request.body,
+      );
+      return response.status(201).send({
+        id: result.company.id,
+        status: result.company.status,
+        invitation: result.invitation,
+      });
+    } catch (error) {
+      logger.error("Could not create company", error);
+      return sendError(response, error, "Could not create company");
+    }
+  }
+
+  static async adminDelete(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const result = await CompanyService.adminDeleteCompany(
+        tenantId,
+        request.params.id,
+      );
+      return response.status(200).send(result);
+    } catch (error) {
+      logger.error("Could not delete company", error);
+      return sendError(response, error, "Could not delete company");
     }
   }
 
@@ -658,13 +709,11 @@ class CompanyController {
       );
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const fileName = `${branchId}-${safeName}`;
-      await NextcloudManager.createFile(
-        tenantId,
-        file.data,
-        fileName,
-        "public",
-        "public/branch-logos",
-      );
+      await NextcloudManager.createFile({
+        tenantID: tenantId,
+        file: { name: fileName, data: file.data },
+        subFolder: "public/branch-logos",
+      });
       const logoUrl = `${process.env.BACKEND_URL}/api/${tenantId}/files/get?name=/public/branch-logos/${encodeURIComponent(fileName)}`;
       const branch = await CompanyService.setBranchLogo(
         tenantId,

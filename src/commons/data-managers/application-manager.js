@@ -55,6 +55,23 @@ class ApplicationManager {
     return raw.map((doc) => doc.toEntity());
   }
 
+  // Application counts grouped by offer for the given offer ids (one aggregate,
+  // not one query per offer). Returns a plain map { offerId: count }.
+  static async countByOffers(tenantId, offerIds) {
+    const counts = {};
+    if (!Array.isArray(offerIds) || offerIds.length === 0) {
+      return counts;
+    }
+    const rows = await ApplicationModel.aggregate([
+      { $match: { tenantId, offerId: { $in: offerIds } } },
+      { $group: { _id: "$offerId", count: { $sum: 1 } } },
+    ]);
+    for (const row of rows) {
+      counts[row._id] = row.count;
+    }
+    return counts;
+  }
+
   static async removeByOffer(tenantId, offerId) {
     await ApplicationModel.deleteMany({ tenantId, offerId });
   }
@@ -88,6 +105,9 @@ class ApplicationManager {
       { tenantId, id },
       { $pull: { documents: { id: documentId } } },
     );
+  }
+  static async countByField(tenantId, field, value) {
+    return ApplicationModel.countDocuments({ tenantId, [field]: value });
   }
 }
 

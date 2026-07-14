@@ -56,6 +56,8 @@ describe("OfferController", () => {
       approveOffer: sandbox.stub().resolves({ id: "o1" }),
       rejectOffer: sandbox.stub().resolves({ id: "o1" }),
       deactivateOffer: sandbox.stub().resolves({ id: "o1" }),
+      reactivateOffer: sandbox.stub().resolves({ id: "o1" }),
+      archiveOffer: sandbox.stub().resolves({ id: "o1" }),
       listOfferMedia: sandbox.stub().resolves([]),
       addOfferMedia: sandbox.stub().resolves({ id: "m1" }),
       removeOfferMedia: sandbox.stub().resolves({
@@ -372,6 +374,78 @@ describe("OfferController", () => {
       expect(r.statusCode).to.equal(200);
       expect(NextcloudManager.deleteFile.callCount).to.equal(2);
       expect(OfferService.deleteOffer.calledOnce).to.equal(true);
+    });
+  });
+
+  describe("company archive + archived lock", () => {
+    it("archiveOffer -> 200 for an authorized company manager", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        branchId: "b1",
+        status: "Online",
+      });
+      const r = res();
+      await OfferController.archiveOffer(req(), r);
+      expect(r.statusCode).to.equal(200);
+      expect(OfferService.archiveOffer.calledWith("kg", "c1", "o1")).to.equal(
+        true,
+      );
+    });
+
+    it("archiveOffer -> 404 for another company's offer", async () => {
+      OfferManager.getOffer.resolves({ id: "o1", companyId: "other" });
+      const r = res();
+      await OfferController.archiveOffer(req(), r);
+      expect(r.statusCode).to.equal(404);
+    });
+
+    it("archiveOffer -> 403 without branch edit rights", async () => {
+      CompanyController.canEditBranch.resolves(false);
+      const r = res();
+      await OfferController.archiveOffer(req(), r);
+      expect(r.statusCode).to.equal(403);
+      expect(OfferService.archiveOffer.called).to.equal(false);
+    });
+
+    it("updateOffer -> 403 on an archived offer for a non-admin", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        branchId: "b1",
+        status: "Archiv",
+      });
+      CompanyController.isTenantAdmin.resolves(false);
+      const r = res();
+      await OfferController.updateOffer(req(), r);
+      expect(r.statusCode).to.equal(403);
+      expect(OfferService.updateOffer.called).to.equal(false);
+    });
+
+    it("updateOffer -> 200 on an archived offer for an admin", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        branchId: "b1",
+        status: "Archiv",
+      });
+      const r = res();
+      await OfferController.updateOffer(req(), r);
+      expect(r.statusCode).to.equal(200);
+    });
+
+    it("deleteOffer -> 403 on an archived offer for a non-admin", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        branchId: "b1",
+        status: "Archiv",
+      });
+      CompanyController.isTenantAdmin.resolves(false);
+      const r = res();
+      await OfferController.deleteOffer(req(), r);
+      expect(r.statusCode).to.equal(403);
+      expect(OfferService.deleteOffer.called).to.equal(false);
     });
   });
 });

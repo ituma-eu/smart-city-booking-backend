@@ -7,6 +7,7 @@ const CompanyBranchManager = require("../../data-managers/company-branch-manager
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
 const PlatformSettingsService = require("../platform-settings-service");
 const ApplicationService = require("../student/application-service");
+const ApplicationManager = require("../../data-managers/application-manager");
 
 const CONTACT_CHANNELS = [
   "Direktbewerbung über Plattform",
@@ -469,7 +470,14 @@ class OfferService {
 
   static async listForModeration(tenantId, filters) {
     const offers = await OfferManager.listForModeration(tenantId, filters);
-    return offers.map(toOfferDto);
+    const counts = await ApplicationManager.countByOffers(
+      tenantId,
+      offers.map((o) => o.id),
+    );
+    return offers.map((offer) => ({
+      ...toOfferDto(offer),
+      applicationCount: counts[offer.id] || 0,
+    }));
   }
 
   static async approveOffer(tenantId, offerId) {
@@ -516,6 +524,42 @@ class OfferService {
     }
     if (offer.status !== "Online") {
       throw { message: "Only online offers can be deactivated", status: 409 };
+    }
+    const updated = await OfferManager.storeOffer({
+      ...offer,
+      status: "Archiv",
+    });
+    return toOfferDto(updated);
+  }
+
+  static async reactivateOffer(tenantId, offerId) {
+    const offer = await OfferManager.getOffer(tenantId, offerId);
+    if (!offer) {
+      throw { message: "Offer not found", status: 404 };
+    }
+    if (offer.status !== "Archiv") {
+      throw {
+        message: "Only archived offers can be reactivated",
+        status: 409,
+      };
+    }
+    const updated = await OfferManager.storeOffer({
+      ...offer,
+      status: "Online",
+      publishedAt: Date.now(),
+    });
+    return toOfferDto(updated);
+  }
+
+  // Company-side archive (Online → Archiv), scoped to the offer's company.
+  // Reversing it (Archiv → Online) is admin-only (reactivateOffer).
+  static async archiveOffer(tenantId, companyId, offerId) {
+    const offer = await OfferManager.getOffer(tenantId, offerId);
+    if (!offer || offer.companyId !== companyId) {
+      throw { message: "Offer not found", status: 404 };
+    }
+    if (offer.status !== "Online") {
+      throw { message: "Only online offers can be archived", status: 409 };
     }
     const updated = await OfferManager.storeOffer({
       ...offer,

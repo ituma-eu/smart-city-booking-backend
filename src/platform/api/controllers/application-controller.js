@@ -170,13 +170,11 @@ class ApplicationController {
       // trees to any authenticated caller. A dedicated root keeps the
       // ownership-checked downloadDocument endpoint as the only reader.
       const subDirectory = `application-documents/${applicationId}`;
-      await NextcloudManager.createFile(
-        tenantId,
-        file.data,
-        bareName,
-        "private",
-        subDirectory,
-      );
+      await NextcloudManager.createFile({
+        tenantID: tenantId,
+        file: { name: bareName, data: file.data },
+        subFolder: subDirectory,
+      });
       const ref = {
         id: documentId,
         type: normalizeDocumentType(request.body && request.body.type),

@@ -84,11 +84,15 @@ class PostService {
     const limit = filters.limit
       ? Math.max(1, Math.min(100, Number(filters.limit) || 0))
       : undefined;
+    const offset = filters.offset
+      ? Math.max(0, Number(filters.offset) || 0)
+      : undefined;
     const posts = await PostManager.listPublished(tenantId, {
       audience,
       tag: filters.tag ? String(filters.tag).trim() : undefined,
       q: filters.q ? String(filters.q).trim() : undefined,
       limit,
+      offset,
     });
     return posts.map(toListDto);
   }

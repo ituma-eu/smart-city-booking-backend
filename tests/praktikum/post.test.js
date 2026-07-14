@@ -58,12 +58,14 @@ describe("PostService", () => {
       tag: "Tipps",
       q: "x",
       limit: "5",
+      offset: "9",
     });
     expect(PostManager.listPublished.firstCall.args[1]).to.deep.equal({
       audience: "students",
       tag: "Tipps",
       q: "x",
       limit: 5,
+      offset: 9,
     });
     expect(res[0]).to.not.have.property("contentHtml");
     expect(res[0]).to.not.have.property("attachments");

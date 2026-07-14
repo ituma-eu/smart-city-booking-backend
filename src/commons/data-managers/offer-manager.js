@@ -54,8 +54,14 @@ class OfferManager {
   }
 
   static async listForModeration(tenantId, filters = {}) {
-    const query = { tenantId, status: { $in: ["In Prüfung", "Online"] } };
-    if (filters.status && ["In Prüfung", "Online"].includes(filters.status)) {
+    const query = {
+      tenantId,
+      status: { $in: ["In Prüfung", "Online", "Archiv"] },
+    };
+    if (
+      filters.status &&
+      ["In Prüfung", "Online", "Archiv"].includes(filters.status)
+    ) {
       query.status = filters.status;
     }
     if (filters.industryId) {
@@ -151,6 +157,9 @@ class OfferManager {
       .limit(limit)
       .skip(skip);
     return raw.map((doc) => doc.toEntity());
+  }
+  static async countByField(tenantId, field, value) {
+    return OfferModel.countDocuments({ tenantId, [field]: value });
   }
 }
 

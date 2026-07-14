@@ -204,11 +204,51 @@ router.post(
   AuthenticationController.isSignedIn,
   CompanyController.block,
 );
+router.post(
+  "/companies/:id/unverify",
+  AuthenticationController.isSignedIn,
+  CompanyController.unverify,
+);
+router.post(
+  "/admin/companies",
+  AuthenticationController.isSignedIn,
+  CompanyController.adminCreate,
+);
+router.delete(
+  "/admin/companies/:id",
+  AuthenticationController.isSignedIn,
+  CompanyController.adminDelete,
+);
 
 // TAXONOMIES
 // ==========
 
 router.get("/taxonomies", TaxonomyController.getTaxonomies);
+router.get(
+  "/admin/taxonomies",
+  AuthenticationController.isSignedIn,
+  TaxonomyController.adminList,
+);
+router.post(
+  "/admin/taxonomies",
+  AuthenticationController.isSignedIn,
+  TaxonomyController.create,
+);
+router.put(
+  "/admin/taxonomies/reorder",
+  AuthenticationController.isSignedIn,
+  TaxonomyController.reorder,
+);
+router.put(
+  "/admin/taxonomies/:id",
+  AuthenticationController.isSignedIn,
+  TaxonomyController.update,
+);
+router.delete(
+  "/admin/taxonomies/:id",
+  AuthenticationController.isSignedIn,
+  TaxonomyController.remove,
+);
 
 // POSTS / INFOS (CMS)
 // ==================
@@ -345,6 +385,11 @@ router.post(
   AuthenticationController.isSignedIn,
   OfferController.deactivateOffer,
 );
+router.post(
+  "/offers/:offerId/reactivate",
+  AuthenticationController.isSignedIn,
+  OfferController.reactivateOffer,
+);
 
 // company-side
 router.get(
@@ -376,6 +421,11 @@ router.delete(
   "/companies/:id/offers/:offerId",
   AuthenticationController.isSignedIn,
   OfferController.deleteOffer,
+);
+router.post(
+  "/companies/:id/offers/:offerId/archive",
+  AuthenticationController.isSignedIn,
+  OfferController.archiveOffer,
 );
 router.get(
   "/companies/:id/offers/:offerId/media",

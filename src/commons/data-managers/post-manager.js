@@ -12,7 +12,10 @@ function publicQuery(tenantId) {
 }
 
 class PostManager {
-  static async listPublished(tenantId, { audience, tag, q, limit } = {}) {
+  static async listPublished(
+    tenantId,
+    { audience, tag, q, limit, offset } = {},
+  ) {
     const query = publicQuery(tenantId);
     if (audience) {
       query.audience = { $in: [audience, "all"] };
@@ -28,8 +31,10 @@ class PostManager {
       Math.max(Number(limit) || DEFAULT_PUBLIC_LIMIT, 1),
       MAX_PUBLIC_LIMIT,
     );
+    const skip = Math.max(Number(offset) || 0, 0);
     const raw = await PostModel.find(query)
       .sort({ publishedAt: -1, created: -1 })
+      .skip(skip)
       .limit(cap);
     return raw.map((doc) => doc.toEntity());
   }

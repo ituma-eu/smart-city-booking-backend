@@ -483,8 +483,8 @@ describe("ApplicationController — company inbox + documents", () => {
     expect(r.statusCode).to.equal(201);
     expect(NextcloudManager.createFile.calledOnce).to.equal(true);
     const args = NextcloudManager.createFile.firstCall.args;
-    expect(args[4]).to.equal("application-documents/a-1");
-    expect(args[4].startsWith("protected/")).to.equal(false);
+    expect(args[0].subFolder).to.equal("application-documents/a-1");
+    expect(args[0].subFolder.startsWith("protected/")).to.equal(false);
     const ref = ApplicationService.addDocumentRef.firstCall.args[2];
     expect(ref.type).to.equal("lebenslauf");
     expect(ref.fileName).to.contain("application-documents/a-1/");

@@ -11,6 +11,7 @@ describe("OfferService", () => {
   let TaxonomyTermManager;
   let PlatformSettingsService;
   let ApplicationServiceMock;
+  let ApplicationManagerMock;
   let OfferService;
 
   const branch = () => ({
@@ -99,6 +100,13 @@ describe("OfferService", () => {
     mock(
       "../../src/commons/services/student/application-service",
       ApplicationServiceMock,
+    );
+    ApplicationManagerMock = {
+      countByOffers: sandbox.stub().resolves({}),
+    };
+    mock(
+      "../../src/commons/data-managers/application-manager",
+      ApplicationManagerMock,
     );
     OfferService = mock.reRequire(
       "../../src/commons/services/company/offer-service",
@@ -274,9 +282,66 @@ describe("OfferService", () => {
       const dto = await OfferService.deactivateOffer("kg", "o1");
       expect(dto.status).to.equal("Archiv");
     });
+    it("listForModeration: attaches applicationCount per offer (0 when none)", async () => {
+      OfferManager.listForModeration.resolves([
+        { id: "o1", companyId: "c1", status: "In Prüfung" },
+        { id: "o2", companyId: "c1", status: "Online" },
+      ]);
+      ApplicationManagerMock.countByOffers.resolves({ o1: 3 });
+      const list = await OfferService.listForModeration("kg", {});
+      expect(ApplicationManagerMock.countByOffers.calledOnce).to.equal(true);
+      expect(
+        ApplicationManagerMock.countByOffers.firstCall.args[1],
+      ).to.deep.equal(["o1", "o2"]);
+      const byId = Object.fromEntries(
+        list.map((o) => [o.id, o.applicationCount]),
+      );
+      expect(byId.o1).to.equal(3);
+      expect(byId.o2).to.equal(0);
+    });
     it("deactivate: only Online can be deactivated (409)", async () => {
       OfferManager.getOffer.resolves({ id: "o1", status: "Entwurf" });
       await expectStatus(() => OfferService.deactivateOffer("kg", "o1"), 409);
+    });
+    it("reactivate: Archiv -> Online", async () => {
+      OfferManager.getOffer.resolves({ id: "o1", status: "Archiv" });
+      const dto = await OfferService.reactivateOffer("kg", "o1");
+      expect(dto.status).to.equal("Online");
+    });
+    it("reactivate: only Archiv can be reactivated (409)", async () => {
+      OfferManager.getOffer.resolves({ id: "o1", status: "Online" });
+      await expectStatus(() => OfferService.reactivateOffer("kg", "o1"), 409);
+    });
+    it("archive: Online -> Archiv (company-scoped)", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        status: "Online",
+      });
+      const dto = await OfferService.archiveOffer("kg", "c1", "o1");
+      expect(dto.status).to.equal("Archiv");
+    });
+    it("archive: 404 for another company's offer", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "other",
+        status: "Online",
+      });
+      await expectStatus(
+        () => OfferService.archiveOffer("kg", "c1", "o1"),
+        404,
+      );
+    });
+    it("archive: only Online can be archived (409)", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        status: "Entwurf",
+      });
+      await expectStatus(
+        () => OfferService.archiveOffer("kg", "c1", "o1"),
+        409,
+      );
     });
   });
 

@@ -55,6 +55,9 @@ class CompanyManager {
   static async deleteCompany(tenantId, id) {
     await CompanyModel.deleteOne({ tenantId, id });
   }
+  static async countByField(tenantId, field, value) {
+    return CompanyModel.countDocuments({ tenantId, [field]: value });
+  }
 }
 
 module.exports = CompanyManager;

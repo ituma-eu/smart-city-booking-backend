@@ -32,6 +32,9 @@ class CompanyBranchManager {
   static async removeBranch(tenantId, id) {
     await CompanyBranchModel.deleteOne({ tenantId, id });
   }
+  static async countByField(tenantId, field, value) {
+    return CompanyBranchModel.countDocuments({ tenantId, [field]: value });
+  }
 }
 
 module.exports = CompanyBranchManager;
