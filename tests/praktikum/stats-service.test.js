@@ -42,15 +42,15 @@ describe("StatsService — admin aggregates", () => {
     mock.stopAll();
   });
 
-  it("byStatus lists every application_status term, 0-filled, in taxonomy order", async () => {
+  it("byStatus lists every application_status term (by id), 0-filled, in taxonomy order", async () => {
     TaxonomyTermManager.getTerms.resolves([
-      { name: "Neu" },
-      { name: "In Prüfung" },
-      { name: "Angenommen" },
+      { id: "s1", name: "Neu" },
+      { id: "s2", name: "In Prüfung" },
+      { id: "s3", name: "Angenommen" },
     ]);
     ApplicationManager.aggregateByStatus.resolves([
-      { status: "Angenommen", count: 1 },
-      { status: "Neu", count: 3 },
+      { status: "s3", count: 1 },
+      { status: "s1", count: 3 },
     ]);
     const res = await StatsService.getStats(T);
     expect(res.applications.byStatus).to.deep.equal([
@@ -60,16 +60,16 @@ describe("StatsService — admin aggregates", () => {
     ]);
   });
 
-  it("byStatus appends statuses no longer defined in the taxonomy", async () => {
-    TaxonomyTermManager.getTerms.resolves([{ name: "Neu" }]);
+  it("byStatus aggregates counts for ids that match no term into a single dash entry", async () => {
+    TaxonomyTermManager.getTerms.resolves([{ id: "s1", name: "Neu" }]);
     ApplicationManager.aggregateByStatus.resolves([
-      { status: "Neu", count: 2 },
-      { status: "Alt", count: 5 },
+      { status: "s1", count: 2 },
+      { status: "gone", count: 5 },
     ]);
     const res = await StatsService.getStats(T);
     expect(res.applications.byStatus).to.deep.equal([
       { status: "Neu", count: 2 },
-      { status: "Alt", count: 5 },
+      { status: "—", count: 5 },
     ]);
   });
 

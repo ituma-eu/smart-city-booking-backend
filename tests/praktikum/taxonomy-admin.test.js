@@ -119,6 +119,17 @@ describe("TaxonomyService — admin CRUD", () => {
     );
   });
 
+  it("createTerm keeps colour for an application_status term", async () => {
+    await TaxonomyService.createTerm(T, {
+      type: "application_status",
+      name: "Neu",
+      color: "#95c121",
+    });
+    expect(TaxonomyTermManager.createTerm.firstCall.args[0].color).to.equal(
+      "#95c121",
+    );
+  });
+
   it("createTerm maps a duplicate-name key error (11000) to 409", async () => {
     TaxonomyTermManager.createTerm.rejects({ code: 11000 });
     const e = await capture(() =>
@@ -144,6 +155,18 @@ describe("TaxonomyService — admin CRUD", () => {
     expect(TaxonomyTermManager.updateTerm.firstCall.args[2].color).to.equal("");
   });
 
+  it("updateTerm keeps colour for an application_status term", async () => {
+    TaxonomyTermManager.getTerm.resolves({
+      id: "s1",
+      type: "application_status",
+      name: "Neu",
+    });
+    await TaxonomyService.updateTerm(T, "s1", { color: "#95c121" });
+    expect(TaxonomyTermManager.updateTerm.firstCall.args[2].color).to.equal(
+      "#95c121",
+    );
+  });
+
   it("updateTerm can toggle active", async () => {
     TaxonomyTermManager.getTerm.resolves({
       id: "i1",
@@ -156,17 +179,17 @@ describe("TaxonomyService — admin CRUD", () => {
     );
   });
 
-  it("updateTerm blocks renaming an application_status term (409)", async () => {
+  it("updateTerm allows renaming an application_status term (stored by id)", async () => {
     TaxonomyTermManager.getTerm.resolves({
       id: "s1",
       type: "application_status",
       name: "Angenommen",
     });
-    const e = await capture(() =>
-      TaxonomyService.updateTerm(T, "s1", { name: "Zugesagt" }),
-    );
-    expect(e && e.status).to.equal(409);
-    expect(TaxonomyTermManager.updateTerm.called).to.equal(false);
+    await TaxonomyService.updateTerm(T, "s1", { name: "Zugesagt" });
+    expect(TaxonomyTermManager.updateTerm.calledOnce).to.equal(true);
+    expect(TaxonomyTermManager.updateTerm.firstCall.args[2]).to.include({
+      name: "Zugesagt",
+    });
   });
 
   it("updateTerm blocks renaming the „andere“ fallback (409)", async () => {
@@ -266,7 +289,7 @@ describe("TaxonomyService — admin CRUD", () => {
     expect(TaxonomyTermManager.removeTerm.called).to.equal(false);
   });
 
-  it("deleteTerm checks application_status usage by NAME", async () => {
+  it("deleteTerm checks application_status usage by id", async () => {
     TaxonomyTermManager.getTerm.resolves({
       id: "s1",
       type: "application_status",
@@ -275,7 +298,7 @@ describe("TaxonomyService — admin CRUD", () => {
     ApplicationManager.countByField.resolves(1);
     const e = await capture(() => TaxonomyService.deleteTerm(T, "s1"));
     expect(
-      ApplicationManager.countByField.calledWith(T, "status", "Angenommen"),
+      ApplicationManager.countByField.calledWith(T, "status", "s1"),
     ).to.equal(true);
     expect(e && e.status).to.equal(409);
   });

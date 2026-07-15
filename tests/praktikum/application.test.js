@@ -283,6 +283,12 @@ describe("ApplicationService — listMyApplications", () => {
     mock("../../src/commons/data-managers/company-manager", {
       getBlockedCompanyIds: sandbox.stub().resolves([]),
     });
+    mock("../../src/commons/data-managers/taxonomy-term-manager", {
+      getTerms: sandbox.stub().resolves([
+        { id: "st-neu", name: "Neu" },
+        { id: "st-eingeladen", name: "Eingeladen" },
+      ]),
+    });
     ApplicationService = mock.reRequire(
       "../../src/commons/services/student/application-service",
     );
@@ -302,8 +308,8 @@ describe("ApplicationService — listMyApplications", () => {
 
   it("hydrates each application with an offer summary + its application status", async () => {
     ApplicationManager.listByUser.resolves([
-      { id: "a-1", offerId: "o-1", status: "Neu", created: 111 },
-      { id: "a-2", offerId: "o-x", status: "Eingeladen", created: 222 },
+      { id: "a-1", offerId: "o-1", status: "st-neu", created: 111 },
+      { id: "a-2", offerId: "o-x", status: "st-eingeladen", created: 222 },
     ]);
     OfferManager.getOffersByIds.resolves([
       {
@@ -319,6 +325,7 @@ describe("ApplicationService — listMyApplications", () => {
       {
         id: "a-1",
         offerId: "o-1",
+        statusId: "st-neu",
         status: "Neu",
         createdAt: 111,
         offer: { id: "o-1", title: "IT", city: "Kiel", companyId: "c-1" },
@@ -327,6 +334,7 @@ describe("ApplicationService — listMyApplications", () => {
       {
         id: "a-2",
         offerId: "o-x",
+        statusId: "st-eingeladen",
         status: "Eingeladen",
         createdAt: 222,
         offer: null,

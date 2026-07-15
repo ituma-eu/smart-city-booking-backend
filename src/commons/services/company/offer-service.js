@@ -8,6 +8,7 @@ const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager")
 const PlatformSettingsService = require("../platform-settings-service");
 const ApplicationService = require("../student/application-service");
 const ApplicationManager = require("../../data-managers/application-manager");
+const AuditLogService = require("../audit-log-service");
 
 const CONTACT_CHANNELS = [
   "Direktbewerbung über Plattform",
@@ -266,6 +267,11 @@ class OfferService {
       views: 0,
       publishedAt: resolved.publishedAt,
     });
+    await AuditLogService.record(
+      tenantId,
+      "create",
+      `Praktikum „${offer.title}" angelegt`,
+    );
     return toOfferDto(offer);
   }
 
@@ -335,6 +341,15 @@ class OfferService {
       created: existing.created,
       views: existing.views,
     });
+    if (existing.status === "Entwurf" && offer.status !== "Entwurf") {
+      await AuditLogService.record(
+        tenantId,
+        "update",
+        offer.status === "Online"
+          ? `Praktikum „${offer.title}" veröffentlicht`
+          : `Praktikum „${offer.title}" zur Prüfung eingereicht`,
+      );
+    }
     return toOfferDto(offer);
   }
 
@@ -423,6 +438,11 @@ class OfferService {
     await ApplicationService.deleteByOffer(tenantId, offerId);
     await OfferMediaManager.removeByOffer(tenantId, offerId);
     await OfferManager.removeOffer(tenantId, offerId);
+    await AuditLogService.record(
+      tenantId,
+      "delete",
+      `Praktikum „${offer.title}" gelöscht`,
+    );
     return { removed: offerId };
   }
 
@@ -494,6 +514,11 @@ class OfferService {
       publishedAt: offer.publishedAt || Date.now(),
       reviewNote: "",
     });
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Praktikum „${updated.title}" freigegeben (Online)`,
+    );
     return toOfferDto(updated);
   }
 
@@ -514,6 +539,11 @@ class OfferService {
       status: "Entwurf",
       reviewNote,
     });
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Praktikum „${updated.title}" abgelehnt`,
+    );
     return toOfferDto(updated);
   }
 
@@ -529,6 +559,11 @@ class OfferService {
       ...offer,
       status: "Archiv",
     });
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Praktikum „${updated.title}" archiviert`,
+    );
     return toOfferDto(updated);
   }
 
@@ -548,6 +583,11 @@ class OfferService {
       status: "Online",
       publishedAt: Date.now(),
     });
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Praktikum „${updated.title}" wieder online gestellt`,
+    );
     return toOfferDto(updated);
   }
 
@@ -565,6 +605,11 @@ class OfferService {
       ...offer,
       status: "Archiv",
     });
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Praktikum „${updated.title}" archiviert`,
+    );
     return toOfferDto(updated);
   }
 

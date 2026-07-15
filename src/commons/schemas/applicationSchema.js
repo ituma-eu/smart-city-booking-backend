@@ -15,7 +15,7 @@ const applicationSchemaDefinition = {
   consentAt: { type: Number, default: null },
   status: {
     type: String,
-    default: "Neu",
+    default: "",
   },
   documents: { type: Array, default: [] },
   created: { type: Number, default: () => Date.now() },

@@ -8,6 +8,7 @@ const CompanyManager = require("../../data-managers/company-manager");
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
 const PlatformSettingsService = require("../platform-settings-service");
 const { NextcloudManager } = require("../../data-managers/file-manager");
+const AuditLogService = require("../audit-log-service");
 
 const MOTIVATION_MAX = 5000;
 
@@ -42,11 +43,12 @@ function toDocDto(tenantId, applicationId, doc) {
   };
 }
 
-function toListDto(tenantId, application, offer) {
+function toListDto(tenantId, application, offer, statusName) {
   return {
     id: application.id,
     offerId: application.offerId,
-    status: application.status,
+    statusId: application.status,
+    status: statusName,
     createdAt: application.created,
     offer: offer
       ? {
@@ -62,7 +64,7 @@ function toListDto(tenantId, application, offer) {
   };
 }
 
-function toCompanyDto(tenantId, application, offer, branchName) {
+function toCompanyDto(tenantId, application, offer, branchName, statusName) {
   return {
     id: application.id,
     offerId: application.offerId,
@@ -78,12 +80,21 @@ function toCompanyDto(tenantId, application, offer, branchName) {
       age: deriveAge(application.birthDate),
     },
     motivation: application.motivation,
-    status: application.status,
+    statusId: application.status,
+    status: statusName,
     createdAt: application.created,
     documents: (application.documents || []).map((doc) =>
       toDocDto(tenantId, application.id, doc),
     ),
   };
+}
+
+async function statusNameMap(tenantId) {
+  const terms = await TaxonomyTermManager.getTerms(tenantId, {
+    type: "application_status",
+    activeOnly: false,
+  });
+  return new Map(terms.map((term) => [term.id, term.name]));
 }
 
 function isDeadlinePassed(deadline) {
@@ -147,7 +158,7 @@ class ApplicationService {
     }
 
     const settings = await PlatformSettingsService.getSettings(tenantId);
-    const initialStatus = settings.defaultApplicationStatus || "Neu";
+    const initialStatus = settings.defaultApplicationStatus;
 
     const now = Date.now();
     let application;
@@ -184,6 +195,11 @@ class ApplicationService {
       throw err;
     }
 
+    await AuditLogService.record(
+      tenantId,
+      "create",
+      `${user.id} hat sich auf „${offer.title}" beworben`,
+    );
     return { id: application.id };
   }
 
@@ -201,8 +217,14 @@ class ApplicationService {
       applications.map((application) => application.offerId),
     );
     const byId = new Map(offers.map((offer) => [offer.id, offer]));
+    const names = await statusNameMap(tenantId);
     return applications.map((application) =>
-      toListDto(tenantId, application, byId.get(application.offerId) || null),
+      toListDto(
+        tenantId,
+        application,
+        byId.get(application.offerId) || null,
+        names.get(application.status) || "—",
+      ),
     );
   }
 
@@ -227,6 +249,7 @@ class ApplicationService {
       companyId,
     );
     const branchNameById = new Map(branches.map((b) => [b.id, b.name]));
+    const names = await statusNameMap(tenantId);
     return applications.map((application) =>
       toCompanyDto(
         tenantId,
@@ -235,6 +258,7 @@ class ApplicationService {
         application.branchId
           ? branchNameById.get(application.branchId) || null
           : null,
+        names.get(application.status) || "—",
       ),
     );
   }
@@ -249,7 +273,7 @@ class ApplicationService {
     const statusTerms = await TaxonomyTermManager.getTerms(tenantId, {
       type: "application_status",
     });
-    if (!statusTerms.some((term) => term.name === status)) {
+    if (!statusTerms.some((term) => term.id === status)) {
       throw { message: "Invalid status", status: 400 };
     }
     const application = await ApplicationManager.getById(
@@ -267,6 +291,12 @@ class ApplicationService {
       throw { message: "Out of branch scope", status: 403 };
     }
     await ApplicationManager.updateStatus(tenantId, applicationId, status);
+    const statusName = statusTerms.find((term) => term.id === status).name;
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Bewerbung von ${application.email} auf „${statusName}" gesetzt`,
+    );
     return { id: applicationId, status };
   }
 

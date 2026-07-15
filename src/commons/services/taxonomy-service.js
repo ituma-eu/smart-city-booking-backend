@@ -5,6 +5,7 @@ const OfferManager = require("../data-managers/offer-manager");
 const CompanyBranchManager = require("../data-managers/company-branch-manager");
 const ApplicationManager = require("../data-managers/application-manager");
 const AccountDeletionManager = require("../data-managers/account-deletion-manager");
+const AuditLogService = require("./audit-log-service");
 
 const TYPES = [
   "industry",
@@ -15,6 +16,9 @@ const TYPES = [
   "deletion_reason_student",
   "deletion_reason_company",
 ];
+
+// Only these types render a colour; it is dropped for the rest.
+const COLORED_TYPES = ["industry", "application_status"];
 
 // The public read DTO (no `active` — public reads are active-only anyway).
 function toTaxonomyDto(term) {
@@ -50,10 +54,9 @@ function groupByType(dtos) {
   return grouped;
 }
 
-// How many live records reference this term. A referenced term must not be
-// hard-deleted (it would orphan the reference) — the caller returns 409 and the
-// admin deactivates it instead. Reference is by term id everywhere except
-// application_status, which stores the term *name* on the application.
+// How many live records reference this term (by id). A referenced term must not
+// be hard-deleted (it would orphan the reference) — the caller returns 409 and
+// the admin deactivates it instead.
 async function countUsage(tenantId, term) {
   switch (term.type) {
     case "industry":
@@ -76,7 +79,7 @@ async function countUsage(tenantId, term) {
     case "company_size":
       return CompanyManager.countByField(tenantId, "sizeId", term.id);
     case "application_status":
-      return ApplicationManager.countByField(tenantId, "status", term.name);
+      return ApplicationManager.countByField(tenantId, "status", term.id);
     case "deletion_reason_student":
     case "deletion_reason_company":
       return AccountDeletionManager.countByField(tenantId, "reasonId", term.id);
@@ -126,12 +129,17 @@ class TaxonomyService {
       tenantId,
       type,
       name: cleanName,
-      color: type === "industry" ? String(color || "").trim() : "",
+      color: COLORED_TYPES.includes(type) ? String(color || "").trim() : "",
       active: active !== false,
       sortOrder,
     };
     try {
       const created = await TaxonomyTermManager.createTerm(term);
+      await AuditLogService.record(
+        tenantId,
+        "create",
+        `Taxonomie-Eintrag „${created.name}" (${type}) angelegt`,
+      );
       return toAdminDto(created);
     } catch (error) {
       if (error && error.code === 11000) {
@@ -154,16 +162,7 @@ class TaxonomyService {
         throw { message: "Name is required", status: 400 };
       }
       if (cleanName !== term.name) {
-        // application_status is referenced by NAME on the application record, so a
-        // rename would orphan existing applications and let the delete-guard be
-        // bypassed; and the "andere" fallback's name is its identity.
-        if (term.type === "application_status") {
-          throw {
-            message:
-              "A status term cannot be renamed because applications reference it by name",
-            status: 409,
-          };
-        }
+        // The "andere" fallback's name is its identity, so it cannot be renamed.
         if (isFallback) {
           throw {
             message: "The „andere“ fallback term cannot be renamed",
@@ -174,7 +173,9 @@ class TaxonomyService {
       patch.name = cleanName;
     }
     if (color !== undefined) {
-      patch.color = term.type === "industry" ? String(color || "").trim() : "";
+      patch.color = COLORED_TYPES.includes(term.type)
+        ? String(color || "").trim()
+        : "";
     }
     if (active !== undefined) {
       if (isFallback && !active) {
@@ -190,6 +191,17 @@ class TaxonomyService {
     }
     try {
       const updated = await TaxonomyTermManager.updateTerm(tenantId, id, patch);
+      let detail = "bearbeitet";
+      if (patch.active !== undefined && patch.active !== term.active) {
+        detail = patch.active ? "aktiviert" : "deaktiviert";
+      } else if (patch.name !== undefined && patch.name !== term.name) {
+        detail = "umbenannt";
+      }
+      await AuditLogService.record(
+        tenantId,
+        "update",
+        `Taxonomie-Eintrag „${updated.name}" ${detail}`,
+      );
       return toAdminDto(updated);
     } catch (error) {
       if (error && error.code === 11000) {
@@ -229,6 +241,11 @@ class TaxonomyService {
     }
     const updates = ordered.map((id, index) => ({ id, sortOrder: index }));
     await TaxonomyTermManager.setSortOrders(tenantId, updates);
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Taxonomie „${type}" neu sortiert`,
+    );
     return TaxonomyService.listAllForAdmin(tenantId, { type });
   }
 
@@ -252,6 +269,11 @@ class TaxonomyService {
       };
     }
     await TaxonomyTermManager.removeTerm(tenantId, id);
+    await AuditLogService.record(
+      tenantId,
+      "delete",
+      `Taxonomie-Eintrag „${term.name}" (${term.type}) gelöscht`,
+    );
     return { deleted: id };
   }
 }

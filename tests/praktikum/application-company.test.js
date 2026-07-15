@@ -24,14 +24,12 @@ describe("ApplicationService — company inbox + status", () => {
       getBranchesByCompany: sandbox.stub().resolves([]),
     };
     TaxonomyTermManager = {
-      getTerms: sandbox
-        .stub()
-        .resolves([
-          { name: "Neu" },
-          { name: "In Prüfung" },
-          { name: "Eingeladen" },
-          { name: "Abgesagt" },
-        ]),
+      getTerms: sandbox.stub().resolves([
+        { id: "st-neu", name: "Neu" },
+        { id: "st-pruefung", name: "In Prüfung" },
+        { id: "st-eingeladen", name: "Eingeladen" },
+        { id: "st-abgesagt", name: "Abgesagt" },
+      ]),
     };
     mock(
       "../../src/commons/data-managers/application-manager",
@@ -71,7 +69,7 @@ describe("ApplicationService — company inbox + status", () => {
         phone: "0431",
         birthDate: "2008-03-14",
         motivation: "hi",
-        status: "Neu",
+        status: "st-neu",
         created: 111,
         documents: [
           {
@@ -99,6 +97,7 @@ describe("ApplicationService — company inbox + status", () => {
     expect(dto.applicant.email).to.equal("lena@x.de");
     expect(dto.applicant.age).to.be.a("number");
     expect(dto.motivation).to.equal("hi");
+    expect(dto.statusId).to.equal("st-neu");
     expect(dto.status).to.equal("Neu");
     expect(dto.documents[0]).to.include({
       id: "d-1",
@@ -144,13 +143,13 @@ describe("ApplicationService — company inbox + status", () => {
       T,
       CO,
       "a-1",
-      "Eingeladen",
+      "st-eingeladen",
       null,
     );
     expect(
-      ApplicationManager.updateStatus.calledWith(T, "a-1", "Eingeladen"),
+      ApplicationManager.updateStatus.calledWith(T, "a-1", "st-eingeladen"),
     ).to.equal(true);
-    expect(res).to.deep.equal({ id: "a-1", status: "Eingeladen" });
+    expect(res).to.deep.equal({ id: "a-1", status: "st-eingeladen" });
   });
 
   it("→ 400 on an invalid status", async () => {
@@ -178,7 +177,7 @@ describe("ApplicationService — company inbox + status", () => {
         T,
         CO,
         "a-1",
-        "Neu",
+        "st-neu",
         null,
       );
     } catch (e) {
@@ -200,7 +199,7 @@ describe("ApplicationService — company inbox + status", () => {
         T,
         CO,
         "a-1",
-        "Neu",
+        "st-neu",
         "b-1",
       );
     } catch (e) {

@@ -24,6 +24,7 @@ const StudentController = require("./controllers/student-controller");
 const AccountDeletionController = require("./controllers/account-deletion-controller");
 const ApplicationController = require("./controllers/application-controller");
 const StatsController = require("./controllers/stats-controller");
+const AuditLogController = require("./controllers/audit-log-controller");
 const { optionalAuth } = require("../../middleware/auth-middleware");
 
 const router = express.Router({ mergeParams: true });
@@ -84,6 +85,11 @@ router.get(
   "/admin/stats",
   AuthenticationController.isSignedIn,
   StatsController.getStats,
+);
+router.get(
+  "/admin/audit-log",
+  AuthenticationController.isSignedIn,
+  AuditLogController.list,
 );
 router.get(
   "/students/me/applications",

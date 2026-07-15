@@ -31,21 +31,26 @@ class StatsService {
   static async getStats(tenantId, companyId) {
     const [terms, statusRows, monthly, locationsByDistrict] = await Promise.all(
       [
-        TaxonomyTermManager.getTerms(tenantId, { type: "application_status" }),
+        TaxonomyTermManager.getTerms(tenantId, {
+          type: "application_status",
+          activeOnly: false,
+        }),
         ApplicationManager.aggregateByStatus(tenantId, companyId),
         ApplicationManager.aggregateMonthly(tenantId, companyId, MONTHS_WINDOW),
         StatsService.locationsByDistrict(tenantId),
       ],
     );
+    const termIds = new Set(terms.map((term) => term.id));
     const counts = new Map(statusRows.map((row) => [row.status, row.count]));
     const byStatus = terms.map((term) => ({
       status: term.name,
-      count: counts.get(term.name) || 0,
+      count: counts.get(term.id) || 0,
     }));
-    for (const row of statusRows) {
-      if (!terms.some((term) => term.name === row.status)) {
-        byStatus.push({ status: row.status, count: row.count });
-      }
+    const orphaned = statusRows
+      .filter((row) => !termIds.has(row.status))
+      .reduce((sum, row) => sum + row.count, 0);
+    if (orphaned > 0) {
+      byStatus.push({ status: "—", count: orphaned });
     }
     return { applications: { byStatus, monthly }, locationsByDistrict };
   }

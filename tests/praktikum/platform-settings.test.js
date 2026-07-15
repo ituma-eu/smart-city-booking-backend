@@ -15,15 +15,13 @@ describe("PlatformSettingsService", () => {
       store: sandbox.stub().callsFake(async (s) => s),
     };
     TaxonomyTermManager = {
-      getTerms: sandbox
-        .stub()
-        .resolves([
-          { name: "Neu" },
-          { name: "In Prüfung" },
-          { name: "Eingeladen" },
-          { name: "Angenommen" },
-          { name: "Abgesagt" },
-        ]),
+      getTerms: sandbox.stub().resolves([
+        { id: "st-neu", name: "Neu" },
+        { id: "st-pruefung", name: "In Prüfung" },
+        { id: "st-eingeladen", name: "Eingeladen" },
+        { id: "st-angenommen", name: "Angenommen" },
+        { id: "st-abgesagt", name: "Abgesagt" },
+      ]),
     };
     mock(
       "../../src/commons/data-managers/platform-settings-manager",
@@ -100,9 +98,9 @@ describe("PlatformSettingsService", () => {
 
     it("accepts a defaultApplicationStatus present in the taxonomy", async () => {
       const s = await PlatformSettingsService.updateSettings("kielregion", {
-        defaultApplicationStatus: "Angenommen",
+        defaultApplicationStatus: "st-angenommen",
       });
-      expect(s.defaultApplicationStatus).to.equal("Angenommen");
+      expect(s.defaultApplicationStatus).to.equal("st-angenommen");
     });
 
     it("rejects a defaultApplicationStatus not in the taxonomy (400)", async () => {

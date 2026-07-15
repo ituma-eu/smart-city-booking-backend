@@ -9,6 +9,7 @@ const MembershipManager = require("../../data-managers/membership-manager");
 const JwtHelper = require("../../utilities/jwt-helper");
 const AccountDeletionService = require("../account-deletion-service");
 const ApplicationService = require("./application-service");
+const AuditLogService = require("../audit-log-service");
 const { isEmail } = require("validator");
 
 const TARGET_GROUPS = ["pupil", "student", "career_changer"];
@@ -182,6 +183,11 @@ class StudentService {
       throw err;
     }
 
+    await AuditLogService.record(
+      tenantId,
+      "create",
+      `Schüler*in ${email} registriert`,
+    );
     return { id: user.id };
   }
 
@@ -345,6 +351,11 @@ class StudentService {
     if (!remaining || remaining.length === 0) {
       await UserManager.deleteUser(userId);
     }
+    await AuditLogService.record(
+      tenantId,
+      "delete",
+      `Schüler*in ${userId} hat das Konto gelöscht`,
+    );
     return { deleted: userId };
   }
 
@@ -411,6 +422,13 @@ class StudentService {
     if (revokeReason) {
       await JwtHelper.revokeAllUserTokens(userId, revokeReason);
     }
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      suspended
+        ? `Schüler*in ${userId} gesperrt`
+        : `Schüler*in ${userId} entsperrt`,
+    );
     return StudentService.adminGetStudent(tenantId, userId);
   }
 
@@ -428,6 +446,11 @@ class StudentService {
     if (!remaining || remaining.length === 0) {
       await UserManager.deleteUser(userId);
     }
+    await AuditLogService.record(
+      tenantId,
+      "delete",
+      `Schüler*in ${userId} durch Admin gelöscht`,
+    );
     return { deleted: userId };
   }
 
