@@ -268,6 +268,7 @@ describe("ApplicationController — company inbox + documents", () => {
     CompanyController = {
       getBranchAccess: sandbox.stub().resolves({ isAdmin: true, member: null }),
       _memberBranchScope: sandbox.stub().returns(null),
+      isTenantAdmin: sandbox.stub().resolves(false),
     };
     PlatformSettingsService = {
       getSettings: sandbox
@@ -508,7 +509,10 @@ describe("ApplicationController — company inbox + documents", () => {
     );
     expect(r.statusCode).to.equal(200);
     expect(
-      NextcloudManager.getFile.calledWith("kielregion", "protected/x"),
+      NextcloudManager.getFile.calledWith({
+        tenant: "kielregion",
+        filename: "protected/x",
+      }),
     ).to.equal(true);
     expect(r.headers["Content-Type"]).to.equal("application/pdf");
   });
@@ -556,7 +560,10 @@ describe("ApplicationController — company inbox + documents", () => {
     );
     expect(r.statusCode).to.equal(200);
     expect(
-      NextcloudManager.getFile.calledWith("kielregion", "protected/x"),
+      NextcloudManager.getFile.calledWith({
+        tenant: "kielregion",
+        filename: "protected/x",
+      }),
     ).to.equal(true);
   });
 

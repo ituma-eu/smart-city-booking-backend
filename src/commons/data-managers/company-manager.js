@@ -55,6 +55,13 @@ class CompanyManager {
   static async deleteCompany(tenantId, id) {
     await CompanyModel.deleteOne({ tenantId, id });
   }
+  static async countByDistrict(tenantId) {
+    const rows = await CompanyModel.aggregate([
+      { $match: { tenantId, districtId: { $nin: [null, ""] } } },
+      { $group: { _id: "$districtId", count: { $sum: 1 } } },
+    ]);
+    return rows.map((row) => ({ districtId: row._id, count: row.count }));
+  }
   static async countByField(tenantId, field, value) {
     return CompanyModel.countDocuments({ tenantId, [field]: value });
   }

@@ -35,6 +35,13 @@ class CompanyBranchManager {
   static async countByField(tenantId, field, value) {
     return CompanyBranchModel.countDocuments({ tenantId, [field]: value });
   }
+  static async countByDistrict(tenantId) {
+    const rows = await CompanyBranchModel.aggregate([
+      { $match: { tenantId, districtId: { $nin: [null, ""] } } },
+      { $group: { _id: "$districtId", count: { $sum: 1 } } },
+    ]);
+    return rows.map((row) => ({ districtId: row._id, count: row.count }));
+  }
 }
 
 module.exports = CompanyBranchManager;

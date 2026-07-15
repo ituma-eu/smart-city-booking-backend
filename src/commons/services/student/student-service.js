@@ -4,6 +4,7 @@ const UserService = require("../user-service");
 const TenantManager = require("../../data-managers/tenant-manager");
 const StudentManager = require("../../data-managers/student-manager");
 const OfferBookmarkManager = require("../../data-managers/offer-bookmark-manager");
+const ApplicationManager = require("../../data-managers/application-manager");
 const MembershipManager = require("../../data-managers/membership-manager");
 const JwtHelper = require("../../utilities/jwt-helper");
 const AccountDeletionService = require("../account-deletion-service");
@@ -40,6 +41,33 @@ function toProfileDto(user, student) {
     grade: student ? student.grade : "",
     targetGroups: student ? student.targetGroups : [],
   };
+}
+
+// Admin-facing DTO: the profile plus account-level meta held on the User
+// (email-verified / blocked / created), the student's tenant and application
+// count. Consents (legalAcceptance) are only attached for the detail view.
+function toAdminDto(user, student, applicationCount, includeConsents) {
+  const dto = {
+    ...toProfileDto(user, student),
+    isVerified: !!user.isVerified,
+    isSuspended: !!user.isSuspended,
+    createdAt: user.created,
+    tenantId: student ? student.tenantId : "",
+    applicationCount: applicationCount || 0,
+  };
+  if (includeConsents) {
+    dto.legalAcceptance = user.legalAcceptance || null;
+  }
+  return dto;
+}
+
+async function setSuspended(userId, suspended) {
+  const user = await UserManager.getUserBy({ id: userId }, true);
+  if (!user) {
+    return;
+  }
+  user.isSuspended = suspended;
+  await UserManager.updateUser(user);
 }
 
 class StudentService {
@@ -142,6 +170,7 @@ class StudentService {
       await UserService.singUpUser(user, data.nextUrl);
       await StudentManager.storeStudent({
         userId: email,
+        tenantId,
         birthDate,
         school,
         grade,
@@ -283,6 +312,7 @@ class StudentService {
 
     await StudentManager.storeStudent({
       userId,
+      tenantId: existing.tenantId,
       birthDate,
       targetGroups,
       school,
@@ -316,6 +346,97 @@ class StudentService {
       await UserManager.deleteUser(userId);
     }
     return { deleted: userId };
+  }
+
+  // A student is scoped to a tenant via the Student doc's tenantId; every admin
+  // method guards on that so one region's admin can only touch its own students.
+
+  static async adminListStudents(tenantId) {
+    const students = await StudentManager.listStudents(tenantId);
+    if (students.length === 0) {
+      return [];
+    }
+    const userIds = students.map((s) => s.userId);
+    const users = await UserManager.getUsersById(userIds, false);
+    const userById = new Map(users.map((u) => [u.id, u]));
+    const counts = await ApplicationManager.countByStudents(tenantId, userIds);
+    return students
+      .filter((s) => userById.has(s.userId))
+      .map((s) =>
+        toAdminDto(userById.get(s.userId), s, counts[s.userId] || 0, false),
+      );
+  }
+
+  static async adminGetStudent(tenantId, userId) {
+    const student = await StudentManager.getStudentByUser(userId);
+    if (!student || student.tenantId !== tenantId) {
+      throw { message: "Student not found", status: 404 };
+    }
+    const user = await UserManager.getUserBy({ id: userId }, true);
+    if (!user) {
+      throw { message: "Student not found", status: 404 };
+    }
+    const counts = await ApplicationManager.countByStudents(tenantId, [userId]);
+    return toAdminDto(user, student, counts[userId] || 0, true);
+  }
+
+  static async adminUpdateStudent(tenantId, userId, payload) {
+    const student = await StudentManager.getStudentByUser(userId);
+    if (!student || student.tenantId !== tenantId) {
+      throw { message: "Student not found", status: 404 };
+    }
+    await StudentService.updateStudentProfile(userId, payload);
+    return StudentService.adminGetStudent(tenantId, userId);
+  }
+
+  static async blockStudent(tenantId, userId) {
+    return StudentService._setStudentSuspended(
+      tenantId,
+      userId,
+      true,
+      "account_blocked",
+    );
+  }
+
+  static async unblockStudent(tenantId, userId) {
+    return StudentService._setStudentSuspended(tenantId, userId, false, null);
+  }
+
+  static async _setStudentSuspended(tenantId, userId, suspended, revokeReason) {
+    const student = await StudentManager.getStudentByUser(userId);
+    if (!student || student.tenantId !== tenantId) {
+      throw { message: "Student not found", status: 404 };
+    }
+    await setSuspended(userId, suspended);
+    if (revokeReason) {
+      await JwtHelper.revokeAllUserTokens(userId, revokeReason);
+    }
+    return StudentService.adminGetStudent(tenantId, userId);
+  }
+
+  static async adminDeleteStudent(tenantId, userId) {
+    const student = await StudentManager.getStudentByUser(userId);
+    if (!student || student.tenantId !== tenantId) {
+      throw { message: "Student not found", status: 404 };
+    }
+    await OfferBookmarkManager.removeByUser(userId);
+    await ApplicationService.deleteByStudent(userId);
+    await StudentManager.removeStudent(userId);
+    await MembershipManager.removeMembership(tenantId, userId);
+    await JwtHelper.revokeAllUserTokens(userId, "account_deleted_by_admin");
+    const remaining = await MembershipManager.getMembershipsByUserID(userId);
+    if (!remaining || remaining.length === 0) {
+      await UserManager.deleteUser(userId);
+    }
+    return { deleted: userId };
+  }
+
+  static async adminListStudentApplications(tenantId, userId) {
+    const student = await StudentManager.getStudentByUser(userId);
+    if (!student || student.tenantId !== tenantId) {
+      throw { message: "Student not found", status: 404 };
+    }
+    return ApplicationService.listMyApplications(tenantId, userId);
   }
 }
 

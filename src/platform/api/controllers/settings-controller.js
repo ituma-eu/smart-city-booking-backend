@@ -2,6 +2,11 @@ const bunyan = require("bunyan");
 const CompanyController = require("./company-controller");
 const PlatformSettingsService = require("../../../commons/services/platform-settings-service");
 const platformSettingsSchema = require("../../../commons/schemas/platformSettingsSchema");
+const {
+  NextcloudManager,
+} = require("../../../commons/data-managers/file-manager");
+const { deleteFileByUrl } = require("../../../commons/utilities/file-url");
+const { MAX_IMAGE_BYTES } = require("../../../commons/utilities/upload-limits");
 
 const SETTINGS_KEYS = Object.keys(platformSettingsSchema);
 
@@ -58,6 +63,71 @@ class SettingsController {
       return response
         .status(error.status || error.statusCode || 500)
         .send(error.message || "Could not update settings");
+    }
+  }
+
+  static async uploadLogo(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const file = request.files && request.files.file;
+      if (
+        !file ||
+        !file.name ||
+        file.name.includes("..") ||
+        file.name.includes("/")
+      ) {
+        return response.status(400).send("Invalid or missing file.");
+      }
+      if (!file.mimetype || !file.mimetype.startsWith("image/")) {
+        return response.status(400).send("Logo must be an image.");
+      }
+      if (file.data.length > MAX_IMAGE_BYTES) {
+        return response.status(413).send("Logo file is too large (max 8 MB).");
+      }
+      const existing = await PlatformSettingsService.getSettings(tenantId);
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const fileName = `settings-logo-${safeName}`;
+      await NextcloudManager.createFile({
+        tenantID: tenantId,
+        file: { name: fileName, data: file.data },
+        subFolder: "public/logos",
+      });
+      const logoUrl = `${process.env.BACKEND_URL}/api/${tenantId}/files/get?name=/public/logos/${encodeURIComponent(fileName)}`;
+      const settings = await PlatformSettingsService.updateSettings(tenantId, {
+        logoUrl,
+      });
+      if (existing.logoUrl && existing.logoUrl !== logoUrl) {
+        await deleteFileByUrl(tenantId, existing.logoUrl);
+      }
+      return response.status(200).send(settings);
+    } catch (error) {
+      logger.error("Could not upload platform logo", error);
+      return response
+        .status(error.status || error.statusCode || 500)
+        .send(error.message || "Could not upload platform logo");
+    }
+  }
+
+  static async removeLogo(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const existing = await PlatformSettingsService.getSettings(tenantId);
+      await deleteFileByUrl(tenantId, existing.logoUrl);
+      const settings = await PlatformSettingsService.updateSettings(tenantId, {
+        logoUrl: "",
+      });
+      return response.status(200).send(settings);
+    } catch (error) {
+      logger.error("Could not remove platform logo", error);
+      return response
+        .status(error.status || error.statusCode || 500)
+        .send(error.message || "Could not remove platform logo");
     }
   }
 }

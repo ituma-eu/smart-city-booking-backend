@@ -146,11 +146,30 @@ class TaxonomyService {
     if (!term) {
       throw { message: "Taxonomy term not found", status: 404 };
     }
+    const isFallback = String(term.name).trim().toLowerCase() === "andere";
     const patch = {};
     if (name !== undefined) {
       const cleanName = String(name).trim();
       if (!cleanName) {
         throw { message: "Name is required", status: 400 };
+      }
+      if (cleanName !== term.name) {
+        // application_status is referenced by NAME on the application record, so a
+        // rename would orphan existing applications and let the delete-guard be
+        // bypassed; and the "andere" fallback's name is its identity.
+        if (term.type === "application_status") {
+          throw {
+            message:
+              "A status term cannot be renamed because applications reference it by name",
+            status: 409,
+          };
+        }
+        if (isFallback) {
+          throw {
+            message: "The „andere“ fallback term cannot be renamed",
+            status: 409,
+          };
+        }
       }
       patch.name = cleanName;
     }
@@ -158,6 +177,12 @@ class TaxonomyService {
       patch.color = term.type === "industry" ? String(color || "").trim() : "";
     }
     if (active !== undefined) {
+      if (isFallback && !active) {
+        throw {
+          message: "The „andere“ fallback term cannot be deactivated",
+          status: 409,
+        };
+      }
       patch.active = !!active;
     }
     if (Object.keys(patch).length === 0) {
@@ -186,10 +211,23 @@ class TaxonomyService {
       type,
       activeOnly: false,
     });
+    // Dedupe the caller's ids (keep first occurrence) and append any known terms
+    // it omitted, so every term ends up with a unique, gapless sortOrder.
     const known = new Set(terms.map((t) => t.id));
-    const updates = orderedIds
-      .filter((id) => known.has(id))
-      .map((id, index) => ({ id, sortOrder: index }));
+    const seen = new Set();
+    const ordered = [];
+    for (const id of orderedIds) {
+      if (known.has(id) && !seen.has(id)) {
+        seen.add(id);
+        ordered.push(id);
+      }
+    }
+    for (const t of terms) {
+      if (!seen.has(t.id)) {
+        ordered.push(t.id);
+      }
+    }
+    const updates = ordered.map((id, index) => ({ id, sortOrder: index }));
     await TaxonomyTermManager.setSortOrders(tenantId, updates);
     return TaxonomyService.listAllForAdmin(tenantId, { type });
   }

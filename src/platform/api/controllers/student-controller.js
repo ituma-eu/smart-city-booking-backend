@@ -1,6 +1,7 @@
 const bunyan = require("bunyan");
 const StudentService = require("../../../commons/services/student/student-service");
 const OfferBookmarkService = require("../../../commons/services/student/offer-bookmark-service");
+const CompanyController = require("./company-controller");
 const { sendError } = require("../../../commons/utilities/http-error");
 
 const logger = bunyan.createLogger({
@@ -116,6 +117,123 @@ class StudentController {
     } catch (error) {
       logger.error("Could not delete student account", error);
       return sendError(response, error, "Could not delete student account");
+    }
+  }
+
+  static async adminList(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const students = await StudentService.adminListStudents(tenantId);
+      return response.status(200).send(students);
+    } catch (error) {
+      logger.error("Could not list students", error);
+      return sendError(response, error, "Could not list students");
+    }
+  }
+
+  static async adminGet(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const student = await StudentService.adminGetStudent(
+        tenantId,
+        request.params.userId,
+      );
+      return response.status(200).send(student);
+    } catch (error) {
+      logger.error("Could not load student", error);
+      return sendError(response, error, "Could not load student");
+    }
+  }
+
+  static async adminUpdate(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const student = await StudentService.adminUpdateStudent(
+        tenantId,
+        request.params.userId,
+        request.body,
+      );
+      return response.status(200).send(student);
+    } catch (error) {
+      logger.error("Could not update student", error);
+      return sendError(response, error, "Could not update student");
+    }
+  }
+
+  static async adminBlock(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const student = await StudentService.blockStudent(
+        tenantId,
+        request.params.userId,
+      );
+      return response.status(200).send(student);
+    } catch (error) {
+      logger.error("Could not block student", error);
+      return sendError(response, error, "Could not block student");
+    }
+  }
+
+  static async adminUnblock(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const student = await StudentService.unblockStudent(
+        tenantId,
+        request.params.userId,
+      );
+      return response.status(200).send(student);
+    } catch (error) {
+      logger.error("Could not unblock student", error);
+      return sendError(response, error, "Could not unblock student");
+    }
+  }
+
+  static async adminDelete(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const result = await StudentService.adminDeleteStudent(
+        tenantId,
+        request.params.userId,
+      );
+      return response.status(200).send(result);
+    } catch (error) {
+      logger.error("Could not delete student", error);
+      return sendError(response, error, "Could not delete student");
+    }
+  }
+
+  static async adminListApplications(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const applications = await StudentService.adminListStudentApplications(
+        tenantId,
+        request.params.userId,
+      );
+      return response.status(200).send(applications);
+    } catch (error) {
+      logger.error("Could not list student applications", error);
+      return sendError(response, error, "Could not list student applications");
     }
   }
 }

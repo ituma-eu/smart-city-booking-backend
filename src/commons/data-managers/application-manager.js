@@ -72,6 +72,21 @@ class ApplicationManager {
     return counts;
   }
 
+  static async countByStudents(tenantId, studentUserIds) {
+    const counts = {};
+    if (!Array.isArray(studentUserIds) || studentUserIds.length === 0) {
+      return counts;
+    }
+    const rows = await ApplicationModel.aggregate([
+      { $match: { tenantId, studentUserId: { $in: studentUserIds } } },
+      { $group: { _id: "$studentUserId", count: { $sum: 1 } } },
+    ]);
+    for (const row of rows) {
+      counts[row._id] = row.count;
+    }
+    return counts;
+  }
+
   static async removeByOffer(tenantId, offerId) {
     await ApplicationModel.deleteMany({ tenantId, offerId });
   }
@@ -108,6 +123,45 @@ class ApplicationManager {
   }
   static async countByField(tenantId, field, value) {
     return ApplicationModel.countDocuments({ tenantId, [field]: value });
+  }
+
+  // Application counts grouped by status, optionally scoped to one company.
+  static async aggregateByStatus(tenantId, companyId) {
+    const match = { tenantId };
+    if (companyId) {
+      match.companyId = companyId;
+    }
+    const rows = await ApplicationModel.aggregate([
+      { $match: match },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]);
+    return rows.map((row) => ({ status: row._id, count: row.count }));
+  }
+
+  // Application counts per calendar month over the last `months` months,
+  // optionally scoped to one company. Returns [{ period: "YYYY-MM", count }] ascending.
+  static async aggregateMonthly(tenantId, companyId, months = 12) {
+    const match = { tenantId };
+    if (companyId) {
+      match.companyId = companyId;
+    }
+    const now = new Date();
+    match.created = {
+      $gte: Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - 1), 1),
+    };
+    const rows = await ApplicationModel.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: "%Y-%m", date: { $toDate: "$created" } },
+          },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+    return rows.map((row) => ({ period: row._id, count: row.count }));
   }
 }
 

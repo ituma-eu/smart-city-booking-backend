@@ -10,6 +10,11 @@ class StudentManager {
     return raw.toEntity();
   }
 
+  static async listStudents(tenantId) {
+    const raw = await StudentModel.find({ tenantId });
+    return raw.map((doc) => doc.toEntity());
+  }
+
   static async storeStudent(student, upsert = true) {
     const studentEntity =
       student instanceof Student ? student : new Student(student);

@@ -26,6 +26,14 @@ async function canAccessApplication(request, application) {
   if (application.studentUserId === request.user.id) {
     return true;
   }
+  if (
+    await CompanyController.isTenantAdmin(
+      request.user.id,
+      request.params.tenant,
+    )
+  ) {
+    return true;
+  }
   const access = await CompanyController.getBranchAccess(
     request.user.id,
     request.params.tenant,
@@ -242,7 +250,10 @@ class ApplicationController {
       if (!doc) {
         return response.sendStatus(404);
       }
-      const data = await NextcloudManager.getFile(tenantId, doc.fileName);
+      const data = await NextcloudManager.getFile({
+        tenant: tenantId,
+        filename: doc.fileName,
+      });
       response.setHeader("Content-Type", "application/pdf");
       response.setHeader("X-Content-Type-Options", "nosniff");
       response.setHeader(

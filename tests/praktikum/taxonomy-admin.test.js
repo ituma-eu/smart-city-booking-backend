@@ -156,6 +156,43 @@ describe("TaxonomyService — admin CRUD", () => {
     );
   });
 
+  it("updateTerm blocks renaming an application_status term (409)", async () => {
+    TaxonomyTermManager.getTerm.resolves({
+      id: "s1",
+      type: "application_status",
+      name: "Angenommen",
+    });
+    const e = await capture(() =>
+      TaxonomyService.updateTerm(T, "s1", { name: "Zugesagt" }),
+    );
+    expect(e && e.status).to.equal(409);
+    expect(TaxonomyTermManager.updateTerm.called).to.equal(false);
+  });
+
+  it("updateTerm blocks renaming the „andere“ fallback (409)", async () => {
+    TaxonomyTermManager.getTerm.resolves({
+      id: "f1",
+      type: "district",
+      name: "andere",
+    });
+    const e = await capture(() =>
+      TaxonomyService.updateTerm(T, "f1", { name: "Sonstige" }),
+    );
+    expect(e && e.status).to.equal(409);
+  });
+
+  it("updateTerm blocks deactivating the „andere“ fallback (409)", async () => {
+    TaxonomyTermManager.getTerm.resolves({
+      id: "f1",
+      type: "district",
+      name: "andere",
+    });
+    const e = await capture(() =>
+      TaxonomyService.updateTerm(T, "f1", { active: false }),
+    );
+    expect(e && e.status).to.equal(409);
+  });
+
   it("reorderTerms persists 0-based sortOrder from the ordered ids, ignoring unknown ids", async () => {
     TaxonomyTermManager.getTerms.resolves([
       { id: "a" },
@@ -171,6 +208,24 @@ describe("TaxonomyService — admin CRUD", () => {
       { id: "c", sortOrder: 0 },
       { id: "a", sortOrder: 1 },
       { id: "b", sortOrder: 2 },
+    ]);
+  });
+
+  it("reorderTerms dedupes ids and appends omitted terms", async () => {
+    TaxonomyTermManager.getTerms.resolves([
+      { id: "a" },
+      { id: "b" },
+      { id: "c" },
+    ]);
+    await TaxonomyService.reorderTerms(T, {
+      type: "industry",
+      orderedIds: ["b", "b", "a"],
+    });
+    const updates = TaxonomyTermManager.setSortOrders.firstCall.args[1];
+    expect(updates).to.deep.equal([
+      { id: "b", sortOrder: 0 },
+      { id: "a", sortOrder: 1 },
+      { id: "c", sortOrder: 2 },
     ]);
   });
 

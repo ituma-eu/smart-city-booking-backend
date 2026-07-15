@@ -23,6 +23,7 @@ const PostController = require("./controllers/post-controller");
 const StudentController = require("./controllers/student-controller");
 const AccountDeletionController = require("./controllers/account-deletion-controller");
 const ApplicationController = require("./controllers/application-controller");
+const StatsController = require("./controllers/stats-controller");
 const { optionalAuth } = require("../../middleware/auth-middleware");
 
 const router = express.Router({ mergeParams: true });
@@ -78,6 +79,11 @@ router.get(
   "/admin/account-deletions",
   AuthenticationController.isSignedIn,
   AccountDeletionController.getStats,
+);
+router.get(
+  "/admin/stats",
+  AuthenticationController.isSignedIn,
+  StatsController.getStats,
 );
 router.get(
   "/students/me/applications",
@@ -220,6 +226,42 @@ router.delete(
   CompanyController.adminDelete,
 );
 
+router.get(
+  "/admin/students",
+  AuthenticationController.isSignedIn,
+  StudentController.adminList,
+);
+router.get(
+  "/admin/students/:userId",
+  AuthenticationController.isSignedIn,
+  StudentController.adminGet,
+);
+router.put(
+  "/admin/students/:userId",
+  AuthenticationController.isSignedIn,
+  StudentController.adminUpdate,
+);
+router.post(
+  "/admin/students/:userId/block",
+  AuthenticationController.isSignedIn,
+  StudentController.adminBlock,
+);
+router.post(
+  "/admin/students/:userId/unblock",
+  AuthenticationController.isSignedIn,
+  StudentController.adminUnblock,
+);
+router.delete(
+  "/admin/students/:userId",
+  AuthenticationController.isSignedIn,
+  StudentController.adminDelete,
+);
+router.get(
+  "/admin/students/:userId/applications",
+  AuthenticationController.isSignedIn,
+  StudentController.adminListApplications,
+);
+
 // TAXONOMIES
 // ==========
 
@@ -320,6 +362,16 @@ router.put(
   "/settings",
   AuthenticationController.isSignedIn,
   SettingsController.updateSettings,
+);
+router.post(
+  "/settings/logo",
+  AuthenticationController.isSignedIn,
+  SettingsController.uploadLogo,
+);
+router.delete(
+  "/settings/logo",
+  AuthenticationController.isSignedIn,
+  SettingsController.removeLogo,
 );
 
 // OFFERS / PRAKTIKA
