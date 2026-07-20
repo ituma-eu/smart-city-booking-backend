@@ -117,7 +117,7 @@ class ApplicationService {
     const data = payload || {};
 
     const student = await StudentManager.getStudentByUser(userId);
-    if (!student) {
+    if (!student || student.tenantId !== tenantId) {
       throw { message: "Only students can apply", status: 403 };
     }
 
@@ -191,9 +191,7 @@ class ApplicationService {
         created: now,
       });
     } catch (err) {
-      // Concurrent submits can both pass the read above and collide on the
-      // unique {tenantId, offerId, studentUserId} index; surface the same 409
-      // as the pre-check rather than leaking the raw driver error.
+      // concurrent submit may collide on the unique index → same 409 as the pre-check
       if (err && err.code === 11000) {
         throw {
           message: "You have already applied to this offer",
@@ -249,9 +247,7 @@ class ApplicationService {
       applications.map((a) => a.offerId),
     );
     const offerById = new Map(offers.map((offer) => [offer.id, offer]));
-    // The branch follows the offer's CURRENT branch, not the value snapshotted
-    // on the application at submission — otherwise moving an offer to another
-    // branch leaves its applications filtering under the old one.
+    // scope by the offer's CURRENT branch, not the value snapshotted at submit
     const branchOf = (a) => {
       const offer = offerById.get(a.offerId);
       return (offer ? offer.branchId : a.branchId) || "";
@@ -342,9 +338,7 @@ class ApplicationService {
     return { removed: documentId };
   }
 
-  // Removes a single application together with its uploaded document files.
-  // Used to roll back a submit whose mandatory CV upload failed, so a failed
-  // application never persists (all-or-nothing).
+  // remove one application + its document files (rolls back a failed submit)
   static async deleteApplication(tenantId, id) {
     const application = await ApplicationManager.getById(tenantId, id);
     if (!application) {
@@ -355,8 +349,7 @@ class ApplicationService {
     return { removed: 1 };
   }
 
-  // Completely removes every application for an offer, including the uploaded
-  // document files on Nextcloud. Used when a company deletes a praktikum.
+  // remove every application for an offer, including its document files
   static async deleteByOffer(tenantId, offerId) {
     const applications = await ApplicationManager.getByOffer(tenantId, offerId);
     await ApplicationService._deleteDocumentFiles(tenantId, applications);
@@ -375,8 +368,7 @@ class ApplicationService {
     return { removed: applications.length };
   }
 
-  // Every application a student submitted, across ALL tenants: deleting the
-  // global user account must not leave PII (documents included) in any tenant.
+  // every application by a student across ALL tenants (deletion leaves no PII)
   static async deleteByStudent(studentUserId) {
     const applications =
       await ApplicationManager.getAllByStudent(studentUserId);
@@ -395,8 +387,7 @@ class ApplicationService {
         try {
           await NextcloudManager.deleteFile(tenantId, doc.fileName);
         } catch {
-          // Best effort: a missing or unreachable file must not abort the
-          // deletion cascade; the database records are the source of truth.
+          // best-effort: a missing file must not abort the deletion cascade
         }
       }
     }

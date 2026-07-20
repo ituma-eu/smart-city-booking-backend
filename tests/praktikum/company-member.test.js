@@ -11,7 +11,7 @@ describe("CompanyService — members & invitations", () => {
   let MembershipManager;
   let CompanyRoleService;
   let CompanyBranchManager;
-  let MailController;
+  let MemberInvitationMail;
   let CompanyService;
 
   beforeEach(() => {
@@ -57,7 +57,7 @@ describe("CompanyService — members & invitations", () => {
     CompanyBranchManager = {
       getBranch: sandbox.stub().resolves({ id: "b1", companyId: "c1" }),
     };
-    MailController = { sendMemberInvitation: sandbox.stub().resolves() };
+    MemberInvitationMail = { sendMemberInvitation: sandbox.stub().resolves() };
 
     mock("../../src/commons/data-managers/company-manager", CompanyManager);
     mock(
@@ -80,7 +80,10 @@ describe("CompanyService — members & invitations", () => {
       "../../src/commons/data-managers/company-branch-manager",
       CompanyBranchManager,
     );
-    mock("../../src/commons/mail-service/mail-controller", MailController);
+    mock(
+      "../../src/commons/services/company/member-invitation-mail",
+      MemberInvitationMail,
+    );
 
     CompanyService = mock.reRequire(
       "../../src/commons/services/company/company-service",
@@ -283,8 +286,11 @@ describe("CompanyService — members & invitations", () => {
       expect(stored.branchId).to.equal("b1");
       expect(stored.token).to.be.a("string").with.length.greaterThan(20);
       expect(stored.invitedBy).to.equal("owner@x.de");
-      expect(MailController.sendMemberInvitation.calledOnce).to.equal(true);
-      const mailArgs = MailController.sendMemberInvitation.firstCall.args[0];
+      expect(MemberInvitationMail.sendMemberInvitation.calledOnce).to.equal(
+        true,
+      );
+      const mailArgs =
+        MemberInvitationMail.sendMemberInvitation.firstCall.args[0];
       expect(mailArgs.companyName).to.equal("Muster GmbH");
       expect(mailArgs.sendTo).to.equal("neu@team.de");
       expect(mailArgs.token).to.equal(stored.token);
@@ -302,7 +308,7 @@ describe("CompanyService — members & invitations", () => {
     });
 
     it("still succeeds if the invite email fails to send", async () => {
-      MailController.sendMemberInvitation.rejects(new Error("mail down"));
+      MemberInvitationMail.sendMemberInvitation.rejects(new Error("mail down"));
       const dto = await CompanyService.inviteMember(
         "kielregion",
         "c1",

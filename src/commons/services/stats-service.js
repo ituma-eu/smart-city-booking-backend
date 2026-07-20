@@ -6,8 +6,7 @@ const TaxonomyTermManager = require("../data-managers/taxonomy-term-manager");
 const MONTHS_WINDOW = 12;
 
 class StatsService {
-  // Locations per district = company HQ (company.districtId) plus every branch
-  // (branch.districtId), summed. HQ is not stored as a branch, so no double-count.
+  // locations per district = company HQ + every branch (HQ is not a branch)
   static async locationsByDistrict(tenantId) {
     const [companies, branches] = await Promise.all([
       CompanyManager.countByDistrict(tenantId),
@@ -25,9 +24,7 @@ class StatsService {
       .sort((a, b) => b.count - a.count);
   }
 
-  // Admin dashboard aggregates that the statistics page can't compute from the
-  // existing list endpoints. `companyId` scopes the application figures to one
-  // company; locations are always tenant-global.
+  // admin dashboard aggregates; companyId scopes the application figures
   static async getStats(tenantId, companyId) {
     const [terms, statusRows, monthly, locationsByDistrict] = await Promise.all(
       [

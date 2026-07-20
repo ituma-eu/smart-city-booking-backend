@@ -11,10 +11,10 @@ const AccountDeletionService = require("../account-deletion-service");
 const ApplicationService = require("./application-service");
 const AuditLogService = require("../audit-log-service");
 const { isEmail } = require("validator");
+const { createResendThrottle } = require("../../utilities/resend-throttle");
 
 const TARGET_GROUPS = ["pupil", "student", "career_changer"];
-const RESEND_VERIFICATION_COOLDOWN_MS = 60 * 1000;
-const lastVerificationResend = new Map();
+const resendThrottle = createResendThrottle();
 
 function isValidBirthDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -44,9 +44,7 @@ function toProfileDto(user, student) {
   };
 }
 
-// Admin-facing DTO: the profile plus account-level meta held on the User
-// (email-verified / blocked / created), the student's tenant and application
-// count. Consents (legalAcceptance) are only attached for the detail view.
+// admin DTO: profile + user meta (verified/blocked/created) + application count
 function toAdminDto(user, student, applicationCount, includeConsents) {
   const dto = {
     ...toProfileDto(user, student),
@@ -200,27 +198,8 @@ class StudentService {
     }
 
     const throttleKey = `${tenantId}:${normalized}`;
-    const now = Date.now();
-    const lastSent = lastVerificationResend.get(throttleKey);
-    if (lastSent && now - lastSent < RESEND_VERIFICATION_COOLDOWN_MS) {
-      const retryAfter = Math.ceil(
-        (RESEND_VERIFICATION_COOLDOWN_MS - (now - lastSent)) / 1000,
-      );
-      throw {
-        message: `Please wait ${retryAfter}s before requesting another verification email`,
-        status: 429,
-      };
-    }
-
-    // Arm the cooldown for every valid-email request before any existence check
-    // so a real unverified account and a non-existent one throttle identically
-    // and cannot be told apart on a second call. The key self-evicts after the
-    // window so the map stays bounded.
-    lastVerificationResend.set(throttleKey, now);
-    setTimeout(
-      () => lastVerificationResend.delete(throttleKey),
-      RESEND_VERIFICATION_COOLDOWN_MS,
-    ).unref();
+    resendThrottle.assertNotThrottled(throttleKey);
+    resendThrottle.arm(throttleKey);
 
     const student = await StudentManager.getStudentByUser(normalized);
     if (!student) {
@@ -331,7 +310,7 @@ class StudentService {
 
   static async deleteAccount(tenantId, userId, reason) {
     const student = await StudentManager.getStudentByUser(userId);
-    if (!student) {
+    if (!student || student.tenantId !== tenantId) {
       throw { message: "Student not found", status: 404 };
     }
     const reasonId = await AccountDeletionService.assertValidReason(
@@ -342,8 +321,7 @@ class StudentService {
     await OfferBookmarkManager.removeByUser(userId);
     await ApplicationService.deleteByStudent(userId);
     await StudentManager.removeStudent(userId);
-    // Count only once the student is actually gone; a retry now hits the 404
-    // guard above and cannot double-count.
+    // count only after removal, so a retry hits the 404 guard (no double-count)
     await AccountDeletionService.increment(tenantId, "student", reasonId);
     await MembershipManager.removeMembership(tenantId, userId);
     await JwtHelper.revokeAllUserTokens(userId, "account_deleted");
@@ -359,8 +337,7 @@ class StudentService {
     return { deleted: userId };
   }
 
-  // A student is scoped to a tenant via the Student doc's tenantId; every admin
-  // method guards on that so one region's admin can only touch its own students.
+  // admin methods guard on the student's tenantId (one region per admin)
 
   static async adminListStudents(tenantId) {
     const students = await StudentManager.listStudents(tenantId);

@@ -13,6 +13,7 @@ describe("CompanyService", () => {
   let CompanyMemberManager;
   let CompanyRoleService;
   let MailController;
+  let MemberInvitationMail;
   let MemberInvitationManager;
   let JwtHelper;
   let CompanyService;
@@ -73,8 +74,8 @@ describe("CompanyService", () => {
     };
     MailController = {
       sendVerificationRequest: sandbox.stub().resolves(),
-      sendMemberInvitation: sandbox.stub().resolves(),
     };
+    MemberInvitationMail = { sendMemberInvitation: sandbox.stub().resolves() };
     MemberInvitationManager = {
       getPendingByEmailInTenant: sandbox.stub().resolves(null),
       store: sandbox.stub().callsFake(async (invitation) => invitation),
@@ -101,6 +102,10 @@ describe("CompanyService", () => {
       CompanyRoleService,
     });
     mock("../../src/commons/mail-service/mail-controller", MailController);
+    mock(
+      "../../src/commons/services/company/member-invitation-mail",
+      MemberInvitationMail,
+    );
     mock(
       "../../src/commons/data-managers/member-invitation-manager",
       MemberInvitationManager,

@@ -9,8 +9,7 @@ const logger = bunyan.createLogger({
 function fail(response, error, fallback) {
   logger.error(fallback, error);
   const status = error.status || error.statusCode || 500;
-  // Only echo the message for intentional client errors; a 5xx carries internal
-  // (driver/validation) detail and some admin routes are unauthenticated.
+  // only echo the message for client errors; a 5xx may carry internal detail
   const body = status < 500 ? error.message || fallback : fallback;
   return response.status(status).send(body);
 }

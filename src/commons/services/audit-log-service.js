@@ -10,10 +10,7 @@ const logger = bunyan.createLogger({
 const ACTIONS = ["create", "update", "delete"];
 
 class AuditLogService {
-  // Fire-and-forget: the write is kicked off but not awaited, so a slow or
-  // failing audit insert never adds latency to — or breaks — the business
-  // action that triggered it. The acting user is read from the request context
-  // (see request-context.js); the display name is resolved best-effort.
+  // fire-and-forget; actor read from the request context
   static record(tenantId, action, message) {
     if (!tenantId || !ACTIONS.includes(action) || !message) {
       return;

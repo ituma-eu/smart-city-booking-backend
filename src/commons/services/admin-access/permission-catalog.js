@@ -1,7 +1,4 @@
-// Permission catalog for the admin access management (Zugriffsverwaltung).
-// A fixed set of section-scoped permissions — the single source of truth for
-// what an admin role may grant. Exposed to the frontend via
-// GET /admin/access/permissions so the UI can render and gate accordingly.
+// Fixed permission catalog for admin roles (served at /admin/access/permissions).
 
 const PERMISSION_CATALOG = [
   {

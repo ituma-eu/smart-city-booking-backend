@@ -7,6 +7,7 @@ const {
 } = require("../../../commons/data-managers/file-manager");
 const { deleteFileByUrl } = require("../../../commons/utilities/file-url");
 const { MAX_IMAGE_BYTES } = require("../../../commons/utilities/upload-limits");
+const { sendError } = require("../../../commons/utilities/http-error");
 
 const SETTINGS_KEYS = Object.keys(platformSettingsSchema);
 
@@ -41,9 +42,7 @@ class SettingsController {
       return response.status(200).send(settings);
     } catch (error) {
       logger.error("Could not load settings", error);
-      return response
-        .status(error.status || error.statusCode || 500)
-        .send(error.message || "Could not load settings");
+      return sendError(response, error, "Could not load settings");
     }
   }
 
@@ -60,9 +59,7 @@ class SettingsController {
       return response.status(200).send(settings);
     } catch (error) {
       logger.error("Could not update settings", error);
-      return response
-        .status(error.status || error.statusCode || 500)
-        .send(error.message || "Could not update settings");
+      return sendError(response, error, "Could not update settings");
     }
   }
 
@@ -105,9 +102,7 @@ class SettingsController {
       return response.status(200).send(settings);
     } catch (error) {
       logger.error("Could not upload platform logo", error);
-      return response
-        .status(error.status || error.statusCode || 500)
-        .send(error.message || "Could not upload platform logo");
+      return sendError(response, error, "Could not upload platform logo");
     }
   }
 
@@ -125,9 +120,7 @@ class SettingsController {
       return response.status(200).send(settings);
     } catch (error) {
       logger.error("Could not remove platform logo", error);
-      return response
-        .status(error.status || error.statusCode || 500)
-        .send(error.message || "Could not remove platform logo");
+      return sendError(response, error, "Could not remove platform logo");
     }
   }
 }

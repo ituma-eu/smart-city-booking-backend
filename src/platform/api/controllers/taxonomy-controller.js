@@ -1,6 +1,7 @@
 const bunyan = require("bunyan");
 const TaxonomyService = require("../../../commons/services/taxonomy-service");
 const CompanyController = require("./company-controller");
+const { sendError } = require("../../../commons/utilities/http-error");
 
 const logger = bunyan.createLogger({
   name: "taxonomy-controller.js",
@@ -9,9 +10,7 @@ const logger = bunyan.createLogger({
 
 function fail(response, error, fallback) {
   logger.error(fallback, error);
-  return response
-    .status(error.status || error.statusCode || 500)
-    .send(error.message || fallback);
+  return sendError(response, error, fallback);
 }
 
 class TaxonomyController {

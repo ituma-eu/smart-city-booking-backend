@@ -22,12 +22,13 @@ const ApplicationService = require("../student/application-service");
 const AccountDeletionService = require("../account-deletion-service");
 const JwtHelper = require("../../utilities/jwt-helper");
 const MailController = require("../../mail-service/mail-controller");
+const MemberInvitationMail = require("./member-invitation-mail");
+const { createResendThrottle } = require("../../utilities/resend-throttle");
 const { isEmail, isURL } = require("validator");
 
 const DESCRIPTION_MAX_LENGTH = 2000;
 const MAX_MEDIA_ITEMS = 12;
-const RESEND_VERIFICATION_COOLDOWN_MS = 60 * 1000;
-const lastVerificationResend = new Map();
+const resendThrottle = createResendThrottle();
 
 async function assertTaxonomyRef(tenantId, id, type, label) {
   if (!id) {
@@ -379,17 +380,8 @@ class CompanyService {
     }
 
     const throttleKey = `${tenantId}:${normalized}`;
-    const now = Date.now();
-    const lastSent = lastVerificationResend.get(throttleKey);
-    if (lastSent && now - lastSent < RESEND_VERIFICATION_COOLDOWN_MS) {
-      const retryAfter = Math.ceil(
-        (RESEND_VERIFICATION_COOLDOWN_MS - (now - lastSent)) / 1000,
-      );
-      throw {
-        message: `Please wait ${retryAfter}s before requesting another verification email`,
-        status: 429,
-      };
-    }
+    resendThrottle.assertNotThrottled(throttleKey);
+    resendThrottle.arm(throttleKey);
 
     const member = await CompanyMemberManager.getMemberByUser(
       tenantId,
@@ -407,16 +399,7 @@ class CompanyService {
     const hook = user.addHook(USER_HOOK_TYPES.VERIFY, { nextUrl });
     await UserManager.updateUser(user);
 
-    const MailController = require("../../mail-service/mail-controller");
     await MailController.sendVerificationRequest(user.id, hook.id);
-
-    // Best-effort per-process cooldown, started only after a mail actually went
-    // out; the key self-evicts after the window so the map stays bounded.
-    lastVerificationResend.set(throttleKey, now);
-    setTimeout(
-      () => lastVerificationResend.delete(throttleKey),
-      RESEND_VERIFICATION_COOLDOWN_MS,
-    ).unref();
   }
 
   static async verifyCompany(tenantId, companyId) {
@@ -479,9 +462,7 @@ class CompanyService {
     return CompanyManager.getCompany(tenantId, companyId);
   }
 
-  // Revert an approval decision back to "unverified" (the neutral pending-review
-  // state). Reverses verifyCompany: members drop back to pending without the
-  // Unternehmen role, and any block-suspension is lifted (unverified is not blocked).
+  // revert to "unverified": members drop to pending, block-suspension lifted
   static async unverifyCompany(tenantId, companyId) {
     const company = await CompanyManager.getCompany(tenantId, companyId);
     if (!company) {
@@ -514,9 +495,7 @@ class CompanyService {
     return CompanyManager.getCompany(tenantId, companyId);
   }
 
-  // Admin authoring of a company: created directly as "verified", with no owner
-  // password and no consents. The owner arrives through the existing member-invitation
-  // flow as a PENDING owner invitation and sets their own password via the link.
+  // admin-authored company: created "verified"; owner joins via invitation
   static async adminCreateCompany(tenantId, payload) {
     const owner = payload.owner || {};
     const companyData = payload.company || {};
@@ -675,14 +654,13 @@ class CompanyService {
         expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
       });
       try {
-        await MailController.sendMemberInvitation({
+        await MemberInvitationMail.sendMemberInvitation({
           sendTo: email,
           companyName: company.name,
           token,
         });
       } catch {
-        // mail is best-effort; the pending owner invitation can be re-sent or
-        // accepted via its link
+        // mail is best-effort; the invitation can be re-sent or accepted via its link
       }
     } catch (err) {
       await CompanyManager.deleteCompany(tenantId, company.id).catch(() => {});
@@ -697,9 +675,7 @@ class CompanyService {
     return { company, invitation: toMemberInvitationDto(invitation) };
   }
 
-  // Admin force-delete: removes a company regardless of its contents. Unlike the
-  // owner self-delete (deleteOwnerAccount), there is no 409 guard — every dependent
-  // record is purged explicitly (no Mongoose cascade hooks exist for these models).
+  // admin force-delete: purge every dependent record (no 409 guard, no cascade)
   static async adminDeleteCompany(tenantId, companyId) {
     const company = await CompanyManager.getCompany(tenantId, companyId);
     if (!company) {
@@ -1099,7 +1075,7 @@ class CompanyService {
     });
 
     try {
-      await MailController.sendMemberInvitation({
+      await MemberInvitationMail.sendMemberInvitation({
         sendTo: email,
         companyName: company.name,
         token,
@@ -1221,9 +1197,7 @@ class CompanyService {
       reason,
     );
 
-    // Deletion is not automatic: the owner must first remove every team member,
-    // pending invitation, branch and internship. Only the emptied company shell
-    // (plus any residual applications) is torn down here.
+    // owner self-delete: requires an emptied company (members/branches/offers gone)
     const members = await CompanyMemberManager.getMembersByCompany(
       tenantId,
       companyId,
@@ -1320,8 +1294,7 @@ class CompanyService {
     if (company.status === "blocked") {
       throw { message: "This company is blocked", status: 403 };
     }
-    // Only a verified company grants immediate active access; for an unverified
-    // company the member stays pending (no role) until admin approval (verifyCompany).
+    // only a verified company grants active access; else the member stays pending
     const activate = company.status === "verified";
 
     const alreadyMember = await CompanyMemberManager.getMemberByUser(
@@ -1389,9 +1362,7 @@ class CompanyService {
 
       await MemberInvitationManager.remove(tenantId, invitation.id);
     } catch (err) {
-      // A failure after createUser would otherwise orphan the user and leave
-      // the invitation pending, permanently locking the invitee out (the 409
-      // existing-user guard above trips on every retry). Undo the writes.
+      // undo the user creation so a retry is not blocked by the existing-user guard
       await CompanyMemberManager.removeMember(
         tenantId,
         invitation.companyId,

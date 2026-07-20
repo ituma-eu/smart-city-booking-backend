@@ -20,12 +20,7 @@ const BUILTIN_ROLE_ID = "administrator";
 const MANAGE_PERMISSION = "access:manage";
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-/**
- * Standalone access management for the admin panel. Decoupled from the legacy
- * Biletado RBAC: the `admin_users` collection is the source of truth for who is
- * an admin and which role (permission set) they hold. The instance owner is
- * always a full admin (safety net against lockout).
- */
+// Standalone admin access management; instance owner is always an admin.
 class AdminAccessService {
   static async _isInstanceOwner(userId) {
     try {
@@ -232,6 +227,16 @@ class AdminAccessService {
         status: 409,
       };
     }
+    const pendingInvites = await AdminInvitationManager.countPendingByRole(
+      tenantId,
+      id,
+    );
+    if (pendingInvites > 0) {
+      throw {
+        message: "This role is still assigned to a pending invitation",
+        status: 409,
+      };
+    }
     await AdminRoleManager.removeRole(tenantId, id);
     return { id };
   }
@@ -363,10 +368,14 @@ class AdminAccessService {
       email,
     );
     if (pending) {
-      throw {
-        message: "An invitation for this email is already pending",
-        status: 409,
-      };
+      if (Date.now() <= pending.expiresAt) {
+        throw {
+          message: "An invitation for this email is already pending",
+          status: 409,
+        };
+      }
+      // drop the expired invitation so the email can be re-invited
+      await AdminInvitationManager.remove(tenantId, pending.id);
     }
     const token = crypto.randomBytes(32).toString("hex");
     try {
@@ -383,8 +392,7 @@ class AdminAccessService {
         expiresAt: Date.now() + INVITE_TTL_MS,
       });
     } catch (err) {
-      // A concurrent invite for the same email can clear the pending check above
-      // and collide on the unique {tenantId, email} pending index; surface 409.
+      // concurrent invite may collide on the unique pending index → 409
       if (err && err.code === 11000) {
         throw {
           message: "An invitation for this email is already pending",
@@ -557,11 +565,7 @@ class AdminAccessService {
 
   // --- Bootstrap ---------------------------------------------------------
 
-  /**
-   * Ensure the built-in „Administrator" role exists (with the full current
-   * permission catalog) and assign the given users to it. Idempotent — safe to
-   * run from a seed migration.
-   */
+  // ensure the built-in Administrator role exists and assign the users (idempotent)
   static async bootstrap(tenantId, adminUserIds = []) {
     const existing = await AdminRoleManager.getRole(tenantId, BUILTIN_ROLE_ID);
     await AdminRoleManager.storeRole({

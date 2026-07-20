@@ -6,8 +6,7 @@ const { Schema } = mongoose;
 const AdminInvitationSchema = new Schema(adminInvitationSchemaDefinition);
 
 AdminInvitationSchema.index({ token: 1 }, { unique: true });
-// At most one pending invitation per email per tenant — blocks a concurrent
-// double-invite where both clear the app-level pending check before either writes.
+// at most one pending invitation per (tenant, email)
 AdminInvitationSchema.index(
   { tenantId: 1, email: 1 },
   { unique: true, partialFilterExpression: { status: "pending" } },

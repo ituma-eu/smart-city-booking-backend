@@ -4,10 +4,6 @@ const {
   renderSnippet,
 } = require("../../mail-service/templates/template-loader");
 
-// Praktikum-owned admin-invitation mail. It reuses the platform mailer, the
-// shared snippet renderer (via an inline source, so nothing is added to the
-// mail-service snippet directory) and the instance mail shell — the core mail
-// code stays untouched.
 const ADMIN_INVITATION_SNIPPET = `
 <p>Sie wurden als Administrator*in für die KielRegion Praktikumsbörse eingeladen.</p>
 

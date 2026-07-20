@@ -48,9 +48,7 @@ function validateApplicationDocumentFile(file, settings) {
   }
 }
 
-// Stores a (pre-validated) PDF for an application on Nextcloud and records its
-// reference. Application documents live under their own root (not public/ or
-// protected/) so the ownership-checked download endpoint is the only reader.
+// store an application PDF under its own non-public root (download is ownership-checked)
 async function persistApplicationDocument(tenantId, applicationId, file, type) {
   const documentId = uuidv4();
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -97,9 +95,7 @@ async function canAccessApplication(request, application) {
   if (branchScope === null) {
     return true;
   }
-  // Scope by the offer's CURRENT branch, not the value snapshotted on the
-  // application at submission — otherwise moving an offer to another branch
-  // leaves document access diverging from list/status visibility.
+  // scope by the offer's CURRENT branch, not the value snapshotted at submit
   const offer = await OfferManager.getOffer(
     request.params.tenant,
     application.offerId,
@@ -113,9 +109,7 @@ class ApplicationController {
     try {
       const tenantId = request.params.tenant;
       const settings = await PlatformSettingsService.getSettings(tenantId);
-      // The CV (Lebenslauf) is mandatory and is stored together with the
-      // application: validate it up front, then roll the application back if the
-      // file write fails, so a submit without its CV never persists.
+      // CV is mandatory: validate up front, roll back the application if it fails
       const cv = request.files && request.files.file;
       validateApplicationDocumentFile(cv, settings);
       const payload = {
@@ -224,8 +218,7 @@ class ApplicationController {
         return response.sendStatus(403);
       }
       const settings = await PlatformSettingsService.getSettings(tenantId);
-      // The CV is the mandatory baseline; maxDocsPerInternship caps the
-      // additional documents allowed on top of it.
+      // maxDocsPerInternship caps the documents on top of the mandatory CV
       const maxDocuments = settings.maxDocsPerInternship + 1;
       if ((application.documents || []).length >= maxDocuments) {
         return response

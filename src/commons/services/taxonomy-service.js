@@ -54,9 +54,7 @@ function groupByType(dtos) {
   return grouped;
 }
 
-// How many live records reference this term (by id). A referenced term must not
-// be hard-deleted (it would orphan the reference) — the caller returns 409 and
-// the admin deactivates it instead.
+// count live references to a term (a referenced term is deactivated, not deleted)
 async function countUsage(tenantId, term) {
   switch (term.type) {
     case "industry":
@@ -223,8 +221,7 @@ class TaxonomyService {
       type,
       activeOnly: false,
     });
-    // Dedupe the caller's ids (keep first occurrence) and append any known terms
-    // it omitted, so every term ends up with a unique, gapless sortOrder.
+    // dedupe ids and append omitted terms → unique, gapless sortOrder
     const known = new Set(terms.map((t) => t.id));
     const seen = new Set();
     const ordered = [];

@@ -8,8 +8,7 @@ class CompanyManager {
     return rawCompanies.map((doc) => doc.toEntity());
   }
 
-  // Paginated + name-searched company list for the admin list view. Returns the
-  // page plus the total count of matches (for the page controls).
+  // paginated, name-searched admin list → { page, total }
   static async getCompaniesPage(tenantId, { status, q, limit, offset } = {}) {
     const query = { tenantId };
     if (status) {

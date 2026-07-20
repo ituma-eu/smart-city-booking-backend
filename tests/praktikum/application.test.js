@@ -22,6 +22,7 @@ describe("ApplicationService — submitApplication", () => {
     StudentManager = {
       getStudentByUser: sandbox.stub().resolves({
         userId,
+        tenantId,
         birthDate: "2008-03-14",
         targetGroups: ["pupil"],
       }),

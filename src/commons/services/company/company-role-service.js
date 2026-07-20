@@ -10,8 +10,7 @@ class CompanyRoleService {
       return existing;
     }
 
-    // Company users are authorized through company_members + /me/context, not the
-    // legacy booking RBAC, so this role grants no legacy permissions.
+    // company authz is via company_members + /me/context, not legacy RBAC
     const role = Role.create({
       id: UNTERNEHMEN_ROLE_ID,
       name: "Unternehmen",

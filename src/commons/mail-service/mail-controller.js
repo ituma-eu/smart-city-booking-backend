@@ -450,26 +450,6 @@ class MailController {
     });
   }
 
-  static async sendMemberInvitation({ sendTo, companyName, token }) {
-    const instance = await InstanceManager.getInstance(false);
-    const invitationUrl = `${process.env.FRONTEND_URL}/einladung?token=${token}`;
-
-    const content = renderSnippet("member-invitation", {
-      companyName,
-      invitationUrl,
-    });
-
-    await MailerService.send({
-      address: sendTo,
-      subject: `Einladung in das Team von ${companyName}`,
-      mailTemplate: instance.mailTemplate,
-      model: {
-        title: `Einladung in das Team von ${companyName}`,
-        content,
-      },
-    });
-  }
-
   static async sendCardLinkRequest({
     address,
     firstName,

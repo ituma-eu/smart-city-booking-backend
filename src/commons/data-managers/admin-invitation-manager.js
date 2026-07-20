@@ -24,6 +24,14 @@ class AdminInvitationManager {
     return raw.map((doc) => doc.toEntity());
   }
 
+  static async countPendingByRole(tenantId, roleId) {
+    return AdminInvitationModel.countDocuments({
+      tenantId,
+      roleId,
+      status: "pending",
+    });
+  }
+
   static async store(invitation, upsert = true) {
     const entity =
       invitation instanceof AdminInvitation

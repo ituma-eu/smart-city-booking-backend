@@ -55,8 +55,7 @@ class ApplicationManager {
     return raw.map((doc) => doc.toEntity());
   }
 
-  // Application counts grouped by offer for the given offer ids (one aggregate,
-  // not one query per offer). Returns a plain map { offerId: count }.
+  // application counts per offer as { offerId: count } (single aggregate)
   static async countByOffers(tenantId, offerIds) {
     const counts = {};
     if (!Array.isArray(offerIds) || offerIds.length === 0) {
@@ -142,8 +141,7 @@ class ApplicationManager {
     return rows.map((row) => ({ status: row._id, count: row.count }));
   }
 
-  // Application counts per calendar month over the last `months` months,
-  // optionally scoped to one company. Returns [{ period: "YYYY-MM", count }] ascending.
+  // monthly application counts, ascending: [{ period: "YYYY-MM", count }]
   static async aggregateMonthly(tenantId, companyId, months = 12) {
     const match = { tenantId };
     if (companyId) {

@@ -1,10 +1,12 @@
+const bunyan = require("bunyan");
 const AdminAccessService = require("./admin-access-service");
 
-/**
- * Express middleware factory that gates an admin route on a single permission.
- * Assumes `AuthenticationController.isSignedIn` has already populated
- * `request.user`. The tenant is taken from the route (`/api/:tenant/...`).
- */
+const logger = bunyan.createLogger({
+  name: "require-permission.js",
+  level: process.env.LOG_LEVEL,
+});
+
+// Middleware gating a route on one admin permission (needs isSignedIn first).
 function requirePermission(permission) {
   return async function (request, response, next) {
     try {
@@ -22,7 +24,8 @@ function requirePermission(permission) {
         return response.sendStatus(403);
       }
       return next();
-    } catch {
+    } catch (error) {
+      logger.error("Permission check failed", error);
       return response.sendStatus(500);
     }
   };

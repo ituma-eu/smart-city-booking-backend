@@ -118,9 +118,7 @@ class PostService {
     return posts.map(toAdminDto);
   }
 
-  // Feed for the signed-in company dashboard: full detail (contentHtml +
-  // attachments) so the panel renders without a second round-trip and without
-  // exposing company-dashboard-only posts through the public detail route.
+  // company-dashboard feed: full detail, incl. dashboard-only posts
   static async listForCompanyDashboard(tenantId) {
     const posts = await PostManager.listForCompany(tenantId);
     return posts.map(toDetailDto);
@@ -285,9 +283,7 @@ class PostService {
     return toAdminDto(post);
   }
 
-  // Thumbnail + attachment records are written by the upload controller (which
-  // owns the Nextcloud file I/O); these helpers only persist the reference on
-  // the post document.
+  // persist only the media reference; the controller owns the file I/O
   static async setThumbnail(tenantId, id, thumbnailUrl) {
     const post = await PostManager.getById(tenantId, id);
     if (!post) {

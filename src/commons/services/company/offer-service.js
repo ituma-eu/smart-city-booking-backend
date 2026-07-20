@@ -287,10 +287,7 @@ class OfferService {
     }
     const fields = await validateOfferPayload(tenantId, companyId, payload);
 
-    // A company may only submit a draft for review or withdraw a pending offer.
-    // Any other requested status — including an echoed current status — leaves
-    // the offer where it is, so a live Online listing is never silently
-    // unpublished and an admin-archived offer cannot be self-republished.
+    // a company may only submit a draft or withdraw a pending offer; else no-op
     let status = existing.status;
     let publishedAt = existing.publishedAt;
     let reviewNote = existing.reviewNote;
@@ -485,8 +482,13 @@ class OfferService {
 
   static async getPublicOffersByIds(tenantId, ids) {
     const offers = await OfferManager.getOffersByIds(tenantId, ids);
+    const blocked = new Set(
+      await CompanyManager.getBlockedCompanyIds(tenantId),
+    );
     return offers
-      .filter((offer) => offer.status === "Online")
+      .filter(
+        (offer) => offer.status === "Online" && !blocked.has(offer.companyId),
+      )
       .map(toPublicOfferDto);
   }
 
@@ -595,9 +597,7 @@ class OfferService {
     return toOfferDto(updated);
   }
 
-  // Company-side archive (Online → Archiv), scoped to the offer's company.
-  // The reverse (Archiv → Online) is available to the company via
-  // reactivateCompanyOffer and to admins via reactivateOffer.
+  // company-side archive (Online → Archiv)
   static async archiveOffer(tenantId, companyId, offerId) {
     const offer = await OfferManager.getOffer(tenantId, offerId);
     if (!offer || offer.companyId !== companyId) {
@@ -618,9 +618,7 @@ class OfferService {
     return toOfferDto(updated);
   }
 
-  // Company-side reactivate (Archiv → Online), the reverse of archiveOffer.
-  // A previously-approved (Online) listing returns straight to Online; only
-  // Archiv offers qualify.
+  // company-side reactivate (Archiv → Online)
   static async reactivateCompanyOffer(tenantId, companyId, offerId) {
     const offer = await OfferManager.getOffer(tenantId, offerId);
     if (!offer || offer.companyId !== companyId) {

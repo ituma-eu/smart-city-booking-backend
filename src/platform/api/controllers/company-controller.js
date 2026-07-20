@@ -64,8 +64,7 @@ class CompanyController {
       const status = COMPANY_STATUS_FILTERS.includes(request.query.status)
         ? request.query.status
         : undefined;
-      // Opt-in pagination: with `limit` the response is { items, total } for the
-      // admin list view; without it, the full array (dashboard/stats/dropdown).
+      // opt-in pagination: with `limit` → { items, total }, else the full array
       const limit = parseInt(request.query.limit, 10);
       if (Number.isFinite(limit) && limit > 0) {
         const offset = Math.max(0, parseInt(request.query.offset, 10) || 0);
@@ -464,11 +463,22 @@ class CompanyController {
       const fileName = `public/media/${bareName}`;
       const url = `${process.env.BACKEND_URL}/api/${tenantId}/files/get?name=/${fileName}`;
       const type = isVideo ? "video" : "image";
-      const media = await CompanyService.addCompanyMedia(tenantId, companyId, {
-        url,
-        fileName,
-        type,
-      });
+      let media;
+      try {
+        media = await CompanyService.addCompanyMedia(tenantId, companyId, {
+          url,
+          fileName,
+          type,
+        });
+      } catch (mediaError) {
+        // remove the orphaned blob if the DB save was rejected
+        try {
+          await NextcloudManager.deleteFile(tenantId, fileName);
+        } catch {
+          // best-effort
+        }
+        throw mediaError;
+      }
       return response.status(201).send(media);
     } catch (error) {
       logger.error("Could not upload media", error);
@@ -881,6 +891,16 @@ class CompanyController {
       ) {
         return response.sendStatus(403);
       }
+      if (
+        !(await CompanyController.hasAdminPermission(
+          access,
+          request.user.id,
+          tenantId,
+          "companies:edit",
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
       const invitation = await CompanyService.inviteMember(
         tenantId,
         companyId,
@@ -929,6 +949,16 @@ class CompanyController {
         companyId,
       );
       if (!access.isAdmin && !access.member) {
+        return response.sendStatus(403);
+      }
+      if (
+        !(await CompanyController.hasAdminPermission(
+          access,
+          request.user.id,
+          tenantId,
+          "companies:edit",
+        ))
+      ) {
         return response.sendStatus(403);
       }
       const scope = CompanyController._memberBranchScope(access);
@@ -993,9 +1023,7 @@ class CompanyController {
   }
 
   static async isTenantAdmin(userId, tenantId) {
-    // Admin status is governed by the standalone access management
-    // (admin_users), not the legacy booking RBAC. The instance owner is always
-    // an admin (see AdminAccessService.isAdmin).
+    // admin status comes from admin_users, not legacy RBAC
     const AdminAccessService = require("../../../commons/services/admin-access/admin-access-service");
     return AdminAccessService.isAdmin(userId, tenantId);
   }
@@ -1063,12 +1091,7 @@ class CompanyController {
     return CompanyController._canEditBranch(access, branchId);
   }
 
-  /**
-   * Beyond the company/branch access check, a tenant-admin who is not a member
-   * of the company must also hold the granular admin permission for the action.
-   * Members and owners are governed by their branch scope alone; the instance
-   * owner always passes (AdminAccessService safety net).
-   */
+  // a non-member admin must also hold the granular permission (members: branch scope)
   static async hasAdminPermission(access, userId, tenantId, permission) {
     if (!access.isAdmin || access.member !== null) {
       return true;

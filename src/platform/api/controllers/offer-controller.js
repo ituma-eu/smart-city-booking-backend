@@ -174,8 +174,7 @@ class OfferController {
       ) {
         return response.sendStatus(403);
       }
-      // Normalize the target scope: an absent/empty branchId means company-level ("")
-      // in the service, so any change of scope — including a move to "" — must be authorized.
+      // normalize target scope ("" = company-level); any scope change must be authorized
       const targetBranchId = String(request.body.branchId || "").trim();
       if (
         targetBranchId !== existing.branchId &&
@@ -432,8 +431,7 @@ class OfferController {
       if (Number.isFinite(limit) && limit > 0) {
         filters.limit = Math.min(limit, 100);
         filters.offset = Math.max(0, parseInt(request.query.offset, 10) || 0);
-        // Sort field is validated against an allow-list in the manager; an
-        // unknown value falls back to the default (created desc).
+        // sort is validated against an allow-list in the manager (default: created desc)
         filters.sort = str(request.query.sort);
         filters.dir = request.query.dir === "asc" ? "asc" : "desc";
       }

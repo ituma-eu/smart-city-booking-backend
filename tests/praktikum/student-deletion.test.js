@@ -19,7 +19,9 @@ describe("StudentService — deleteAccount", () => {
     sandbox = sinon.createSandbox();
     UserManager = { deleteUser: sandbox.stub().resolves() };
     StudentManager = {
-      getStudentByUser: sandbox.stub().resolves({ userId }),
+      getStudentByUser: sandbox
+        .stub()
+        .resolves({ userId, tenantId: "kielregion" }),
       removeStudent: sandbox.stub().resolves(),
     };
     OfferBookmarkManager = { removeByUser: sandbox.stub().resolves() };

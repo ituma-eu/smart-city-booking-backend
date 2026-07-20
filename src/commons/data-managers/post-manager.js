@@ -5,8 +5,7 @@ const { escapeRegex } = require("../utilities/regexUtils");
 const DEFAULT_PUBLIC_LIMIT = 50;
 const MAX_PUBLIC_LIMIT = 100;
 
-// Public reads only ever return published posts that are not flagged
-// company-dashboard-only.
+// public reads: published, non company-dashboard-only posts
 function publicQuery(tenantId) {
   return { tenantId, published: true, companyDashboardOnly: { $ne: true } };
 }
@@ -48,9 +47,7 @@ class PostManager {
     return PostModel.distinct("tags", publicQuery(tenantId));
   }
 
-  // Company-dashboard feed: published posts aimed at companies (audience
-  // companies/all), including the ones flagged company-dashboard-only that the
-  // public reads never return.
+  // company-dashboard feed: published company/all posts incl. dashboard-only
   static async listForCompany(tenantId) {
     const raw = await PostModel.find({
       tenantId,

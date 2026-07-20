@@ -10,8 +10,7 @@ class AccountDeletionManager {
         { upsert: true },
       );
     } catch (err) {
-      // Concurrent upserts can race on the unique index before the row exists;
-      // it exists after the losing insert, so a plain $inc applies the count.
+      // race-safe: after the losing upsert the row exists, so $inc applies
       if (err && err.code === 11000) {
         await AccountDeletionModel.updateOne(filter, { $inc: { count: 1 } });
       } else {

@@ -3,9 +3,7 @@ const { escapeRegex } = require("../utilities/regexUtils");
 
 class AuditLogManager {
   static async append(entry) {
-    // Best-effort: if the connection is not ready, skip rather than queue the
-    // write in mongoose's command buffer (which would otherwise resolve or time
-    // out long after the request that triggered it has finished).
+    // best-effort: skip if the connection is not ready (don't buffer the write)
     if (AuditLogModel.db.readyState !== 1) {
       return;
     }

@@ -3,14 +3,10 @@ const OfferModel = require("./models/offerModel");
 const { escapeRegex } = require("../utilities/regexUtils");
 
 const DEFAULT_SEARCH_LIMIT = 50;
-// Generous cap so a praktika map (public search, company profile, dashboard,
-// statistics) can render every matching marker; the /praktika list paginates
-// client-side over the full result set. Bump if a tenant ever exceeds this.
+// generous cap so the map can render every matching marker (client paginates)
 const MAX_SEARCH_LIMIT = 2000;
 
-// Fields the admin moderation list may sort by (stored on the offer). Computed
-// columns like applicationCount / company name are not here — they would need a
-// cross-collection join to sort correctly under pagination.
+// sortable moderation fields (stored on the offer; no cross-collection sorts)
 const MODERATION_SORT_FIELDS = ["title", "created", "publishedAt", "views"];
 
 function moderationSortSpec(filters) {
@@ -18,8 +14,7 @@ function moderationSortSpec(filters) {
     ? filters.sort
     : "created";
   const dir = filters.dir === "asc" ? 1 : -1;
-  // Secondary key keeps pagination stable when the primary has ties (e.g. many
-  // offers with 0 views or a null publishedAt).
+  // secondary key keeps pagination stable when the primary has ties
   return field === "created" ? { created: dir } : { [field]: dir, created: -1 };
 }
 
@@ -88,8 +83,7 @@ class OfferManager {
     if (filters.q) {
       query.title = { $regex: escapeRegex(filters.q), $options: "i" };
     }
-    // Opt-in pagination for the admin list view: with `limit` return the page
-    // plus the total match count; otherwise the full list (dashboard/stats).
+    // opt-in pagination: with `limit` → page + total, else the full list
     if (Number.isFinite(filters.limit) && filters.limit > 0) {
       const total = await OfferModel.countDocuments(query);
       const raw = await OfferModel.find(query)

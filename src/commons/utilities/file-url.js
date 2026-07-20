@@ -5,9 +5,7 @@ const logger = bunyan.createLogger({
   level: process.env.LOG_LEVEL,
 });
 
-// Parse the `name` query parameter out of a stored /files/get URL and delete
-// that file from Nextcloud. Best-effort: a missing or unreachable file must
-// never be fatal to the surrounding operation.
+// delete the file named in a stored /files/get URL (best-effort)
 async function deleteFileByUrl(tenantId, url) {
   if (!url) {
     return;

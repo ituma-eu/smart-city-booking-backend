@@ -3,8 +3,7 @@ const adminRoleSchemaDefinition = {
   tenantId: { type: String, required: true },
   name: { type: String, required: true },
   permissions: { type: [String], default: [] },
-  // The built-in „Administrator" role: all permissions, cannot be edited or
-  // deleted (lockout prevention).
+  // built-in Administrator role: all permissions, not editable/deletable
   builtin: { type: Boolean, default: false },
   created: { type: Number, default: () => Date.now() },
 };
