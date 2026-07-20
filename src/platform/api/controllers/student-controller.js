@@ -84,11 +84,27 @@ class StudentController {
         request.params.tenant,
         request.user.id,
         request.body && request.body.offerId,
+        request.body && request.body.note,
       );
       return response.status(201).send(result);
     } catch (error) {
       logger.error("Could not add bookmark", error);
       return sendError(response, error, "Could not add bookmark");
+    }
+  }
+
+  static async setBookmarkNote(request, response) {
+    try {
+      const result = await OfferBookmarkService.setNote(
+        request.params.tenant,
+        request.user.id,
+        request.params.offerId,
+        request.body && request.body.note,
+      );
+      return response.status(200).send(result);
+    } catch (error) {
+      logger.error("Could not update bookmark note", error);
+      return sendError(response, error, "Could not update bookmark note");
     }
   }
 

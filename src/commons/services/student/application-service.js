@@ -56,6 +56,7 @@ function toListDto(tenantId, application, offer, statusName) {
           title: offer.title,
           city: offer.city,
           companyId: offer.companyId,
+          status: offer.status,
         }
       : null,
     documents: (application.documents || []).map((doc) =>
@@ -64,12 +65,19 @@ function toListDto(tenantId, application, offer, statusName) {
   };
 }
 
-function toCompanyDto(tenantId, application, offer, branchName, statusName) {
+function toCompanyDto(
+  tenantId,
+  application,
+  offer,
+  branchName,
+  statusName,
+  branchId,
+) {
   return {
     id: application.id,
     offerId: application.offerId,
     offerTitle: offer ? offer.title : null,
-    branchId: application.branchId,
+    branchId: branchId !== undefined ? branchId : application.branchId,
     branchName: branchName || null,
     applicant: {
       firstName: application.firstName,
@@ -229,13 +237,10 @@ class ApplicationService {
   }
 
   static async listCompanyApplications(tenantId, companyId, branchScope) {
-    let applications = await ApplicationManager.getByCompany(
+    const applications = await ApplicationManager.getByCompany(
       tenantId,
       companyId,
     );
-    if (branchScope !== null && branchScope !== undefined) {
-      applications = applications.filter((a) => a.branchId === branchScope);
-    }
     if (applications.length === 0) {
       return [];
     }
@@ -244,23 +249,37 @@ class ApplicationService {
       applications.map((a) => a.offerId),
     );
     const offerById = new Map(offers.map((offer) => [offer.id, offer]));
+    // The branch follows the offer's CURRENT branch, not the value snapshotted
+    // on the application at submission — otherwise moving an offer to another
+    // branch leaves its applications filtering under the old one.
+    const branchOf = (a) => {
+      const offer = offerById.get(a.offerId);
+      return (offer ? offer.branchId : a.branchId) || "";
+    };
+    const scoped =
+      branchScope !== null && branchScope !== undefined
+        ? applications.filter((a) => branchOf(a) === branchScope)
+        : applications;
+    if (scoped.length === 0) {
+      return [];
+    }
     const branches = await CompanyBranchManager.getBranchesByCompany(
       tenantId,
       companyId,
     );
     const branchNameById = new Map(branches.map((b) => [b.id, b.name]));
     const names = await statusNameMap(tenantId);
-    return applications.map((application) =>
-      toCompanyDto(
+    return scoped.map((application) => {
+      const branchId = branchOf(application);
+      return toCompanyDto(
         tenantId,
         application,
         offerById.get(application.offerId) || null,
-        application.branchId
-          ? branchNameById.get(application.branchId) || null
-          : null,
+        branchId ? branchNameById.get(branchId) || null : null,
         names.get(application.status) || "—",
-      ),
-    );
+        branchId,
+      );
+    });
   }
 
   static async updateApplicationStatus(
@@ -283,12 +302,13 @@ class ApplicationService {
     if (!application || application.companyId !== companyId) {
       throw { message: "Application not found", status: 404 };
     }
-    if (
-      branchScope !== null &&
-      branchScope !== undefined &&
-      application.branchId !== branchScope
-    ) {
-      throw { message: "Out of branch scope", status: 403 };
+    if (branchScope !== null && branchScope !== undefined) {
+      // Scope by the offer's CURRENT branch (see listCompanyApplications).
+      const offer = await OfferManager.getOffer(tenantId, application.offerId);
+      const branchId = (offer ? offer.branchId : application.branchId) || "";
+      if (branchId !== branchScope) {
+        throw { message: "Out of branch scope", status: 403 };
+      }
     }
     await ApplicationManager.updateStatus(tenantId, applicationId, status);
     const statusName = statusTerms.find((term) => term.id === status).name;
@@ -320,6 +340,19 @@ class ApplicationService {
       documentId,
     );
     return { removed: documentId };
+  }
+
+  // Removes a single application together with its uploaded document files.
+  // Used to roll back a submit whose mandatory CV upload failed, so a failed
+  // application never persists (all-or-nothing).
+  static async deleteApplication(tenantId, id) {
+    const application = await ApplicationManager.getById(tenantId, id);
+    if (!application) {
+      return { removed: 0 };
+    }
+    await ApplicationService._deleteDocumentFiles(tenantId, [application]);
+    await ApplicationManager.removeById(tenantId, id);
+    return { removed: 1 };
   }
 
   // Completely removes every application for an offer, including the uploaded

@@ -108,6 +108,7 @@ describe("CompanyService — deleteOwnerAccount", () => {
   let CompanyBranchManager;
   let MemberInvitationManager;
   let OfferManager;
+  let OfferBookmarkManager;
   let UserManager;
   let MembershipManager;
   let ApplicationService;
@@ -148,6 +149,7 @@ describe("CompanyService — deleteOwnerAccount", () => {
       remove: sandbox.stub().resolves(),
     };
     OfferManager = { getOffersByCompany: sandbox.stub().resolves([]) };
+    OfferBookmarkManager = { removeByOffer: sandbox.stub().resolves() };
     UserManager = { deleteUser: sandbox.stub().resolves() };
     MembershipManager = {
       removeMembership: sandbox.stub().resolves(),
@@ -181,6 +183,10 @@ describe("CompanyService — deleteOwnerAccount", () => {
       MemberInvitationManager,
     );
     mock("../../src/commons/data-managers/offer-manager", OfferManager);
+    mock(
+      "../../src/commons/data-managers/offer-bookmark-manager",
+      OfferBookmarkManager,
+    );
     mock("../../src/commons/data-managers/user-manager", UserManager);
     mock(
       "../../src/commons/data-managers/membership-manager",
@@ -378,6 +384,7 @@ describe("CompanyService — adminDeleteCompany (force cascade)", () => {
   let MemberInvitationManager;
   let OfferManager;
   let OfferMediaManager;
+  let OfferBookmarkManager;
   let UserManager;
   let MembershipManager;
   let ApplicationService;
@@ -420,6 +427,7 @@ describe("CompanyService — adminDeleteCompany (force cascade)", () => {
       getMediaByOffer: sandbox.stub().resolves([]),
       removeByOffer: sandbox.stub().resolves(),
     };
+    OfferBookmarkManager = { removeByOffer: sandbox.stub().resolves() };
     UserManager = { deleteUser: sandbox.stub().resolves() };
     MembershipManager = {
       removeMembership: sandbox.stub().resolves(),
@@ -452,6 +460,10 @@ describe("CompanyService — adminDeleteCompany (force cascade)", () => {
     mock(
       "../../src/commons/data-managers/offer-media-manager",
       OfferMediaManager,
+    );
+    mock(
+      "../../src/commons/data-managers/offer-bookmark-manager",
+      OfferBookmarkManager,
     );
     mock("../../src/commons/data-managers/user-manager", UserManager);
     mock(
@@ -504,6 +516,7 @@ describe("CompanyService — adminDeleteCompany (force cascade)", () => {
     const res = await CompanyService.adminDeleteCompany(T, CO);
 
     expect(OfferMediaManager.removeByOffer.callCount).to.equal(2);
+    expect(OfferBookmarkManager.removeByOffer.callCount).to.equal(2);
     expect(OfferManager.removeOffer.callCount).to.equal(2);
     expect(ApplicationService.deleteByCompany.calledWith(T, CO)).to.equal(true);
     expect(CompanyBranchManager.removeBranch.calledWith(T, "b1")).to.equal(

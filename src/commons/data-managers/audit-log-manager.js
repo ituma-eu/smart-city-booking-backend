@@ -20,16 +20,22 @@ class AuditLogManager {
     if (q) {
       filter.message = { $regex: escapeRegex(String(q)), $options: "i" };
     }
+    const total = await AuditLogModel.countDocuments(filter);
     const rows = await AuditLogModel.find(filter)
       .sort({ createdAt: -1 })
       .skip(offset)
       .limit(limit);
-    return rows.map((doc) => ({
-      id: String(doc._id),
-      action: doc.action,
-      message: doc.message,
-      createdAt: doc.createdAt,
-    }));
+    return {
+      items: rows.map((doc) => ({
+        id: String(doc._id),
+        action: doc.action,
+        message: doc.message,
+        actorId: doc.actorId || "",
+        actorName: doc.actorName || "",
+        createdAt: doc.createdAt,
+      })),
+      total,
+    };
   }
 }
 

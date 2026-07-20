@@ -2,6 +2,7 @@ const bunyan = require("bunyan");
 const { v4: uuidv4 } = require("uuid");
 const ApplicationService = require("../../../commons/services/student/application-service");
 const PlatformSettingsService = require("../../../commons/services/platform-settings-service");
+const OfferManager = require("../../../commons/data-managers/offer-manager");
 const CompanyController = require("./company-controller");
 const { sendError } = require("../../../commons/utilities/http-error");
 const {
@@ -20,6 +21,56 @@ function normalizeDocumentType(value) {
     .trim()
     .toLowerCase();
   return DOCUMENT_TYPES.includes(type) ? type : "other";
+}
+
+function validateApplicationDocumentFile(file, settings) {
+  if (
+    !file ||
+    !file.name ||
+    file.name.includes("..") ||
+    file.name.includes("/")
+  ) {
+    throw { status: 400, message: "Invalid or missing file." };
+  }
+  // The client-supplied mimetype is spoofable, so also require the PDF magic bytes.
+  const isPdf =
+    file.mimetype === "application/pdf" &&
+    file.data &&
+    file.data.slice(0, 5).toString("latin1") === "%PDF-";
+  if (!isPdf) {
+    throw { status: 400, message: "Only PDF documents are allowed." };
+  }
+  if (file.data.length > settings.maxDocSizeMb * 1024 * 1024) {
+    throw {
+      status: 413,
+      message: `Document is too large (max ${settings.maxDocSizeMb} MB).`,
+    };
+  }
+}
+
+// Stores a (pre-validated) PDF for an application on Nextcloud and records its
+// reference. Application documents live under their own root (not public/ or
+// protected/) so the ownership-checked download endpoint is the only reader.
+async function persistApplicationDocument(tenantId, applicationId, file, type) {
+  const documentId = uuidv4();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const bareName = `${documentId}-${safeName}`;
+  const subDirectory = `application-documents/${applicationId}`;
+  await NextcloudManager.createFile({
+    tenantID: tenantId,
+    file: { name: bareName, data: file.data },
+    subFolder: subDirectory,
+  });
+  const ref = {
+    id: documentId,
+    type: normalizeDocumentType(type),
+    originalName: file.name,
+    fileName: `${subDirectory}/${bareName}`,
+    size: file.data.length,
+    created: Date.now(),
+  };
+  await ApplicationService.addDocumentRef(tenantId, applicationId, ref);
+  return ref;
 }
 
 async function canAccessApplication(request, application) {
@@ -43,18 +94,52 @@ async function canAccessApplication(request, application) {
     return false;
   }
   const branchScope = CompanyController._memberBranchScope(access);
-  return branchScope === null || branchScope === application.branchId;
+  if (branchScope === null) {
+    return true;
+  }
+  // Scope by the offer's CURRENT branch, not the value snapshotted on the
+  // application at submission — otherwise moving an offer to another branch
+  // leaves document access diverging from list/status visibility.
+  const offer = await OfferManager.getOffer(
+    request.params.tenant,
+    application.offerId,
+  );
+  const branchId = (offer ? offer.branchId : application.branchId) || "";
+  return branchScope === branchId;
 }
 
 class ApplicationController {
   static async submit(request, response) {
     try {
+      const tenantId = request.params.tenant;
+      const settings = await PlatformSettingsService.getSettings(tenantId);
+      // The CV (Lebenslauf) is mandatory and is stored together with the
+      // application: validate it up front, then roll the application back if the
+      // file write fails, so a submit without its CV never persists.
+      const cv = request.files && request.files.file;
+      validateApplicationDocumentFile(cv, settings);
+      const payload = {
+        motivation: request.body && request.body.motivation,
+        consent:
+          (request.body && request.body.consent) === true ||
+          (request.body && request.body.consent) === "true",
+      };
       const result = await ApplicationService.submitApplication(
-        request.params.tenant,
+        tenantId,
         request.user.id,
         request.params.offerId,
-        request.body,
+        payload,
       );
+      try {
+        await persistApplicationDocument(tenantId, result.id, cv, "lebenslauf");
+      } catch (docError) {
+        try {
+          await ApplicationService.deleteApplication(tenantId, result.id);
+        } catch (rollbackError) {
+          logger.error("Application rollback failed", rollbackError);
+        }
+        throw docError;
+      }
       return response.status(201).send({ id: result.id });
     } catch (error) {
       logger.error("Could not submit application", error);
@@ -139,59 +224,24 @@ class ApplicationController {
         return response.sendStatus(403);
       }
       const settings = await PlatformSettingsService.getSettings(tenantId);
-      if (
-        (application.documents || []).length >= settings.maxDocsPerInternship
-      ) {
+      // The CV is the mandatory baseline; maxDocsPerInternship caps the
+      // additional documents allowed on top of it.
+      const maxDocuments = settings.maxDocsPerInternship + 1;
+      if ((application.documents || []).length >= maxDocuments) {
         return response
           .status(400)
-          .send(
-            `Maximum of ${settings.maxDocsPerInternship} documents reached.`,
-          );
+          .send(`Maximum of ${maxDocuments} documents reached.`);
       }
-      const file = request.files && request.files.file;
-      if (
-        !file ||
-        !file.name ||
-        file.name.includes("..") ||
-        file.name.includes("/")
-      ) {
-        return response.status(400).send("Invalid or missing file.");
-      }
-      // The client-supplied mimetype is spoofable, so also require the PDF magic bytes.
-      const isPdf =
-        file.mimetype === "application/pdf" &&
-        file.data &&
-        file.data.slice(0, 5).toString("latin1") === "%PDF-";
-      if (!isPdf) {
-        return response.status(400).send("Only PDF documents are allowed.");
-      }
-      if (file.data.length > settings.maxDocSizeMb * 1024 * 1024) {
-        return response
-          .status(413)
-          .send(`Document is too large (max ${settings.maxDocSizeMb} MB).`);
-      }
-      const documentId = uuidv4();
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const bareName = `${documentId}-${safeName}`;
-      // Application documents must not live under public/ or protected/: the
-      // generic /files/list and /files/get routes enumerate and serve those
-      // trees to any authenticated caller. A dedicated root keeps the
-      // ownership-checked downloadDocument endpoint as the only reader.
-      const subDirectory = `application-documents/${applicationId}`;
-      await NextcloudManager.createFile({
-        tenantID: tenantId,
-        file: { name: bareName, data: file.data },
-        subFolder: subDirectory,
-      });
-      const ref = {
-        id: documentId,
-        type: normalizeDocumentType(request.body && request.body.type),
-        originalName: file.name,
-        fileName: `${subDirectory}/${bareName}`,
-        size: file.data.length,
-        created: Date.now(),
-      };
-      await ApplicationService.addDocumentRef(tenantId, applicationId, ref);
+      validateApplicationDocumentFile(
+        request.files && request.files.file,
+        settings,
+      );
+      const ref = await persistApplicationDocument(
+        tenantId,
+        applicationId,
+        request.files.file,
+        request.body && request.body.type,
+      );
       return response
         .status(201)
         .send(

@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require("uuid");
 const { isEmail } = require("validator");
 const OfferManager = require("../../data-managers/offer-manager");
 const OfferMediaManager = require("../../data-managers/offer-media-manager");
+const OfferBookmarkManager = require("../../data-managers/offer-bookmark-manager");
 const CompanyManager = require("../../data-managers/company-manager");
 const CompanyBranchManager = require("../../data-managers/company-branch-manager");
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
@@ -436,6 +437,7 @@ class OfferService {
       throw { message: "Offer not found", status: 404 };
     }
     await ApplicationService.deleteByOffer(tenantId, offerId);
+    await OfferBookmarkManager.removeByOffer(tenantId, offerId);
     await OfferMediaManager.removeByOffer(tenantId, offerId);
     await OfferManager.removeOffer(tenantId, offerId);
     await AuditLogService.record(
@@ -489,15 +491,17 @@ class OfferService {
   }
 
   static async listForModeration(tenantId, filters) {
-    const offers = await OfferManager.listForModeration(tenantId, filters);
+    const result = await OfferManager.listForModeration(tenantId, filters);
+    const offers = Array.isArray(result) ? result : result.items;
     const counts = await ApplicationManager.countByOffers(
       tenantId,
       offers.map((o) => o.id),
     );
-    return offers.map((offer) => ({
+    const dtos = offers.map((offer) => ({
       ...toOfferDto(offer),
       applicationCount: counts[offer.id] || 0,
     }));
+    return Array.isArray(result) ? dtos : { items: dtos, total: result.total };
   }
 
   static async approveOffer(tenantId, offerId) {
@@ -592,7 +596,8 @@ class OfferService {
   }
 
   // Company-side archive (Online → Archiv), scoped to the offer's company.
-  // Reversing it (Archiv → Online) is admin-only (reactivateOffer).
+  // The reverse (Archiv → Online) is available to the company via
+  // reactivateCompanyOffer and to admins via reactivateOffer.
   static async archiveOffer(tenantId, companyId, offerId) {
     const offer = await OfferManager.getOffer(tenantId, offerId);
     if (!offer || offer.companyId !== companyId) {
@@ -609,6 +614,30 @@ class OfferService {
       tenantId,
       "update",
       `Praktikum „${updated.title}" archiviert`,
+    );
+    return toOfferDto(updated);
+  }
+
+  // Company-side reactivate (Archiv → Online), the reverse of archiveOffer.
+  // A previously-approved (Online) listing returns straight to Online; only
+  // Archiv offers qualify.
+  static async reactivateCompanyOffer(tenantId, companyId, offerId) {
+    const offer = await OfferManager.getOffer(tenantId, offerId);
+    if (!offer || offer.companyId !== companyId) {
+      throw { message: "Offer not found", status: 404 };
+    }
+    if (offer.status !== "Archiv") {
+      throw { message: "Only archived offers can be reactivated", status: 409 };
+    }
+    const updated = await OfferManager.storeOffer({
+      ...offer,
+      status: "Online",
+      publishedAt: Date.now(),
+    });
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Praktikum „${updated.title}" wieder online gestellt`,
     );
     return toOfferDto(updated);
   }

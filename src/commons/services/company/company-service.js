@@ -13,6 +13,7 @@ const { deleteFileByUrl } = require("../../utilities/file-url");
 const CompanyBranchManager = require("../../data-managers/company-branch-manager");
 const OfferManager = require("../../data-managers/offer-manager");
 const OfferMediaManager = require("../../data-managers/offer-media-manager");
+const OfferBookmarkManager = require("../../data-managers/offer-bookmark-manager");
 const MemberInvitationManager = require("../../data-managers/member-invitation-manager");
 const AuditLogService = require("../audit-log-service");
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
@@ -715,6 +716,7 @@ class CompanyService {
         await deleteFileByUrl(tenantId, item.url);
       }
       await OfferMediaManager.removeByOffer(tenantId, offer.id);
+      await OfferBookmarkManager.removeByOffer(tenantId, offer.id);
       await OfferManager.removeOffer(tenantId, offer.id);
     }
     await ApplicationService.deleteByCompany(tenantId, companyId);

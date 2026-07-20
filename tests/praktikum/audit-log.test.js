@@ -23,6 +23,7 @@ describe("AuditLogManager", () => {
       db: { readyState: 1 },
       create: sandbox.stub().resolves(),
       find: sandbox.stub().returns(chain),
+      countDocuments: sandbox.stub().resolves(0),
     };
     mock("../../src/commons/data-managers/models/auditLogModel", AuditLogModel);
     AuditLogManager = mock.reRequire(
@@ -77,13 +78,22 @@ describe("AuditLogManager", () => {
     });
   });
 
-  it("list maps rows to a clean DTO", async () => {
+  it("list maps rows to a clean DTO + returns the total", async () => {
     chain.limit.resolves([
       { _id: 1, action: "create", message: "m", createdAt: 42, extra: "no" },
     ]);
-    const rows = await AuditLogManager.list(T);
-    expect(rows).to.deep.equal([
-      { id: "1", action: "create", message: "m", createdAt: 42 },
+    AuditLogModel.countDocuments.resolves(1);
+    const res = await AuditLogManager.list(T);
+    expect(res.total).to.equal(1);
+    expect(res.items).to.deep.equal([
+      {
+        id: "1",
+        action: "create",
+        message: "m",
+        actorId: "",
+        actorName: "",
+        createdAt: 42,
+      },
     ]);
   });
 });
@@ -110,13 +120,44 @@ describe("AuditLogService.record — fire-and-forget", () => {
     mock.stopAll();
   });
 
-  it("appends a valid entry", async () => {
+  it("appends a valid entry (no actor outside a request context)", async () => {
     await AuditLogService.record(T, "create", "something happened");
+    await flush();
     expect(AuditLogManager.append.calledOnce).to.equal(true);
     expect(AuditLogManager.append.firstCall.args[0]).to.deep.equal({
       tenantId: T,
       action: "create",
       message: "something happened",
+      actorId: "",
+      actorName: "",
+    });
+  });
+
+  it("captures the acting user from the request context and resolves the name", async () => {
+    const UserManager = {
+      getUser: sandbox
+        .stub()
+        .resolves({ firstName: "Lena", lastName: "Petersen" }),
+    };
+    mock("../../src/commons/data-managers/user-manager", UserManager);
+    const requestContext = require("../../src/commons/utilities/request-context");
+    AuditLogService = mock.reRequire(
+      "../../src/commons/services/audit-log-service",
+    );
+    await requestContext.storage.run(
+      { user: { id: "lena@kg.de" } },
+      async () => {
+        AuditLogService.record(T, "update", "did a thing");
+        await flush();
+      },
+    );
+    expect(UserManager.getUser.calledOnceWith("lena@kg.de")).to.equal(true);
+    expect(AuditLogManager.append.firstCall.args[0]).to.deep.equal({
+      tenantId: T,
+      action: "update",
+      message: "did a thing",
+      actorId: "lena@kg.de",
+      actorName: "Lena Petersen",
     });
   });
 

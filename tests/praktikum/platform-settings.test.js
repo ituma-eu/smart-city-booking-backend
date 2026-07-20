@@ -76,11 +76,18 @@ describe("PlatformSettingsService", () => {
       expect(s.maxDocSizeMb).to.equal(10); // untouched default
     });
 
-    it("rejects maxDocsPerInternship < 1 (400)", async () => {
+    it("accepts maxDocsPerInternship 0 (CV only, no additional documents)", async () => {
+      const s = await PlatformSettingsService.updateSettings("kielregion", {
+        maxDocsPerInternship: 0,
+      });
+      expect(s.maxDocsPerInternship).to.equal(0);
+    });
+
+    it("rejects a negative maxDocsPerInternship (400)", async () => {
       let err;
       try {
         await PlatformSettingsService.updateSettings("kielregion", {
-          maxDocsPerInternship: 0,
+          maxDocsPerInternship: -1,
         });
       } catch (e) {
         err = e;

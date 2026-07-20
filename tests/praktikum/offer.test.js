@@ -6,6 +6,7 @@ describe("OfferService", () => {
   let sandbox;
   let OfferManager;
   let OfferMediaManager;
+  let OfferBookmarkManager;
   let CompanyManager;
   let CompanyBranchManager;
   let TaxonomyTermManager;
@@ -50,6 +51,9 @@ describe("OfferService", () => {
       storeMedia: sandbox.stub().callsFake(async (m) => m),
       removeMedia: sandbox.stub().resolves(),
     };
+    OfferBookmarkManager = {
+      removeByOffer: sandbox.stub().resolves(),
+    };
     CompanyManager = {
       getCompany: sandbox.stub().resolves({
         id: "c1",
@@ -80,6 +84,10 @@ describe("OfferService", () => {
     mock(
       "../../src/commons/data-managers/offer-media-manager",
       OfferMediaManager,
+    );
+    mock(
+      "../../src/commons/data-managers/offer-bookmark-manager",
+      OfferBookmarkManager,
     );
     mock("../../src/commons/data-managers/company-manager", CompanyManager);
     mock(
@@ -299,6 +307,20 @@ describe("OfferService", () => {
       expect(byId.o1).to.equal(3);
       expect(byId.o2).to.equal(0);
     });
+    it("listForModeration paginated: returns { items, total } with counts", async () => {
+      OfferManager.listForModeration.resolves({
+        items: [{ id: "o1", companyId: "c1", status: "In Prüfung" }],
+        total: 7,
+      });
+      ApplicationManagerMock.countByOffers.resolves({ o1: 2 });
+      const res = await OfferService.listForModeration("kg", {
+        limit: 10,
+        offset: 0,
+      });
+      expect(res.total).to.equal(7);
+      expect(res.items).to.have.length(1);
+      expect(res.items[0].applicationCount).to.equal(2);
+    });
     it("deactivate: only Online can be deactivated (409)", async () => {
       OfferManager.getOffer.resolves({ id: "o1", status: "Entwurf" });
       await expectStatus(() => OfferService.deactivateOffer("kg", "o1"), 409);
@@ -340,6 +362,37 @@ describe("OfferService", () => {
       });
       await expectStatus(
         () => OfferService.archiveOffer("kg", "c1", "o1"),
+        409,
+      );
+    });
+    it("reactivateCompanyOffer: Archiv -> Online (company-scoped)", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        status: "Archiv",
+      });
+      const dto = await OfferService.reactivateCompanyOffer("kg", "c1", "o1");
+      expect(dto.status).to.equal("Online");
+    });
+    it("reactivateCompanyOffer: 404 for another company's offer", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "other",
+        status: "Archiv",
+      });
+      await expectStatus(
+        () => OfferService.reactivateCompanyOffer("kg", "c1", "o1"),
+        404,
+      );
+    });
+    it("reactivateCompanyOffer: only Archiv can be reactivated (409)", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        status: "Online",
+      });
+      await expectStatus(
+        () => OfferService.reactivateCompanyOffer("kg", "c1", "o1"),
         409,
       );
     });
@@ -410,11 +463,14 @@ describe("OfferService", () => {
         404,
       );
     });
-    it("deleteOffer: removes the offer, its media and its applications", async () => {
+    it("deleteOffer: removes the offer, its media, its applications and its bookmarks", async () => {
       OfferManager.getOffer.resolves({ id: "o1", companyId: "c1" });
       await OfferService.deleteOffer("kg", "c1", "o1");
       expect(
         ApplicationServiceMock.deleteByOffer.calledWith("kg", "o1"),
+      ).to.equal(true);
+      expect(
+        OfferBookmarkManager.removeByOffer.calledWith("kg", "o1"),
       ).to.equal(true);
       expect(OfferMediaManager.removeByOffer.calledWith("kg", "o1")).to.equal(
         true,
@@ -819,7 +875,7 @@ describe("OfferManager — searchOnline query building", () => {
 
   it("clamps an oversized limit to the max and applies the offset", async () => {
     await OfferManager2.searchOnline("kg", { limit: 5000, offset: 20 });
-    expect(captured.limit).to.equal(100);
+    expect(captured.limit).to.equal(2000);
     expect(captured.skip).to.equal(20);
   });
 });

@@ -14,6 +14,7 @@ describe("OfferBookmarkService", () => {
     OfferBookmarkManager = {
       getByUser: sandbox.stub().resolves([]),
       add: sandbox.stub().resolves(),
+      setNote: sandbox.stub().resolves(),
       remove: sandbox.stub().resolves(),
     };
     OfferManager = { getOffer: sandbox.stub().resolves(null) };
@@ -44,9 +45,9 @@ describe("OfferBookmarkService", () => {
     return err;
   };
 
-  it("listBookmarks hydrates available offers and flags unavailable ones", async () => {
+  it("listBookmarks hydrates available offers, flags unavailable ones and carries the note", async () => {
     OfferBookmarkManager.getByUser.resolves([
-      { offerId: "o1", created: 200 },
+      { offerId: "o1", created: 200, note: "Frist im Blick behalten" },
       { offerId: "o2", created: 100 },
     ]);
     OfferService.getPublicOffersByIds.resolves([
@@ -60,12 +61,14 @@ describe("OfferBookmarkService", () => {
     expect(list[0]).to.deep.equal({
       offerId: "o1",
       savedAt: 200,
+      note: "Frist im Blick behalten",
       available: true,
       offer: { id: "o1", title: "Praktikum A", status: "Online" },
     });
     expect(list[1]).to.deep.equal({
       offerId: "o2",
       savedAt: 100,
+      note: "",
       available: false,
       offer: null,
     });
@@ -77,7 +80,73 @@ describe("OfferBookmarkService", () => {
     expect(
       OfferBookmarkManager.add.calledWith("kielregion", "u@x.de", "o1"),
     ).to.equal(true);
+    expect(OfferBookmarkManager.setNote.called).to.equal(false);
     expect(res).to.deep.equal({ offerId: "o1" });
+  });
+
+  it("addBookmark with a note upserts the bookmark and stores the trimmed note", async () => {
+    OfferManager.getOffer.resolves({ id: "o1", status: "Online" });
+    const res = await Service.addBookmark(
+      "kielregion",
+      "u@x.de",
+      "o1",
+      "  bald bewerben  ",
+    );
+    expect(
+      OfferBookmarkManager.setNote.calledWith(
+        "kielregion",
+        "u@x.de",
+        "o1",
+        "bald bewerben",
+      ),
+    ).to.equal(true);
+    expect(OfferBookmarkManager.add.called).to.equal(false);
+    expect(res).to.deep.equal({ offerId: "o1", note: "bald bewerben" });
+  });
+
+  it("addBookmark → 400 when the note exceeds the length limit", async () => {
+    OfferManager.getOffer.resolves({ id: "o1", status: "Online" });
+    const err = await reject(() =>
+      Service.addBookmark("kg", "u@x.de", "o1", "x".repeat(2001)),
+    );
+    expect(err.status).to.equal(400);
+    expect(OfferBookmarkManager.setNote.called).to.equal(false);
+  });
+
+  it("setNote upserts the note for an Online offer (owner-scoped)", async () => {
+    OfferManager.getOffer.resolves({ id: "o1", status: "Online" });
+    const res = await Service.setNote(
+      "kielregion",
+      "u@x.de",
+      "o1",
+      "  Termin merken  ",
+    );
+    expect(
+      OfferBookmarkManager.setNote.calledWith(
+        "kielregion",
+        "u@x.de",
+        "o1",
+        "Termin merken",
+      ),
+    ).to.equal(true);
+    expect(res).to.deep.equal({ offerId: "o1", note: "Termin merken" });
+  });
+
+  it("setNote → 404 when the offer is unknown or not Online", async () => {
+    OfferManager.getOffer.resolves(null);
+    expect(
+      (await reject(() => Service.setNote("kg", "u@x.de", "o1", "x"))).status,
+    ).to.equal(404);
+    expect(OfferBookmarkManager.setNote.called).to.equal(false);
+  });
+
+  it("setNote → 400 when the note exceeds the length limit", async () => {
+    OfferManager.getOffer.resolves({ id: "o1", status: "Online" });
+    const err = await reject(() =>
+      Service.setNote("kg", "u@x.de", "o1", "x".repeat(2001)),
+    );
+    expect(err.status).to.equal(400);
+    expect(OfferBookmarkManager.setNote.called).to.equal(false);
   });
 
   it("addBookmark → 404 when the offer is unknown or not Online", async () => {
@@ -138,6 +207,7 @@ describe("StudentController — bookmarks", () => {
     OfferBookmarkService = {
       listBookmarks: sandbox.stub().resolves([]),
       addBookmark: sandbox.stub().resolves({ offerId: "o1" }),
+      setNote: sandbox.stub().resolves({ offerId: "o1", note: "n" }),
       removeBookmark: sandbox.stub().resolves({ removed: "o1" }),
     };
     mock(
@@ -167,19 +237,45 @@ describe("StudentController — bookmarks", () => {
     ).to.equal(true);
   });
 
-  it("addBookmark returns 201 with the JWT user id", async () => {
+  it("addBookmark returns 201 with the JWT user id and forwards the note", async () => {
     const r = res();
     await StudentController.addBookmark(
       {
         params: { tenant: "kielregion" },
         user: { id: "u@x.de" },
-        body: { offerId: "o1" },
+        body: { offerId: "o1", note: "bald bewerben" },
       },
       r,
     );
     expect(r.statusCode).to.equal(201);
     expect(
-      OfferBookmarkService.addBookmark.calledWith("kielregion", "u@x.de", "o1"),
+      OfferBookmarkService.addBookmark.calledWith(
+        "kielregion",
+        "u@x.de",
+        "o1",
+        "bald bewerben",
+      ),
+    ).to.equal(true);
+  });
+
+  it("setBookmarkNote returns 200 and scopes the note to the JWT user id", async () => {
+    const r = res();
+    await StudentController.setBookmarkNote(
+      {
+        params: { tenant: "kielregion", offerId: "o1" },
+        user: { id: "u@x.de" },
+        body: { note: "Termin merken", userId: "attacker@x.de" },
+      },
+      r,
+    );
+    expect(r.statusCode).to.equal(200);
+    expect(
+      OfferBookmarkService.setNote.calledWith(
+        "kielregion",
+        "u@x.de",
+        "o1",
+        "Termin merken",
+      ),
     ).to.equal(true);
   });
 
@@ -213,5 +309,42 @@ describe("StudentController — bookmarks", () => {
       r,
     );
     expect(r.statusCode).to.equal(404);
+  });
+});
+
+describe("OfferBookmarkManager — removeByOffer", () => {
+  let sandbox;
+  let captured;
+  let Manager;
+
+  beforeEach(() => {
+    sandbox = sinon.createSandbox();
+    captured = {};
+    const FakeModel = {
+      deleteMany(query) {
+        captured.query = query;
+        return Promise.resolve();
+      },
+    };
+    mock(
+      "../../src/commons/data-managers/models/offerBookmarkModel",
+      FakeModel,
+    );
+    Manager = mock.reRequire(
+      "../../src/commons/data-managers/offer-bookmark-manager",
+    );
+  });
+
+  afterEach(() => {
+    sandbox.restore();
+    mock.stopAll();
+  });
+
+  it("deletes every bookmark for the offer, scoped to the tenant", async () => {
+    await Manager.removeByOffer("kielregion", "o1");
+    expect(captured.query).to.deep.equal({
+      tenantId: "kielregion",
+      offerId: "o1",
+    });
   });
 });

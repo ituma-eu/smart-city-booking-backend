@@ -328,7 +328,13 @@ describe("ApplicationService — listMyApplications", () => {
         statusId: "st-neu",
         status: "Neu",
         createdAt: 111,
-        offer: { id: "o-1", title: "IT", city: "Kiel", companyId: "c-1" },
+        offer: {
+          id: "o-1",
+          title: "IT",
+          city: "Kiel",
+          companyId: "c-1",
+          status: "Online",
+        },
         documents: [],
       },
       {
@@ -348,6 +354,13 @@ describe("ApplicationController", () => {
   let sandbox;
   let ApplicationService;
   let ApplicationController;
+  let NextcloudManager;
+
+  const CV = () => ({
+    name: "cv.pdf",
+    mimetype: "application/pdf",
+    data: Buffer.from("%PDF-1.4 test"),
+  });
 
   const res = () => ({
     statusCode: null,
@@ -367,11 +380,20 @@ describe("ApplicationController", () => {
     ApplicationService = {
       submitApplication: sandbox.stub().resolves({ id: "a-1" }),
       listMyApplications: sandbox.stub().resolves([{ id: "a-1" }]),
+      addDocumentRef: sandbox.stub().resolves(),
+      deleteApplication: sandbox.stub().resolves({ removed: 1 }),
     };
     mock(
       "../../src/commons/services/student/application-service",
       ApplicationService,
     );
+    mock("../../src/commons/services/platform-settings-service", {
+      getSettings: sandbox
+        .stub()
+        .resolves({ maxDocSizeMb: 10, maxDocsPerInternship: 5 }),
+    });
+    NextcloudManager = { createFile: sandbox.stub().resolves() };
+    mock("../../src/commons/data-managers/file-manager", { NextcloudManager });
     ApplicationController = mock.reRequire(
       "../../src/platform/api/controllers/application-controller",
     );
@@ -382,13 +404,14 @@ describe("ApplicationController", () => {
     mock.stopAll();
   });
 
-  it("submit returns 201 and forwards tenant, JWT user id, offerId and body", async () => {
+  it("submit stores the CV with the application and returns 201 (consent coerced from the multipart string)", async () => {
     const r = res();
     await ApplicationController.submit(
       {
         params: { tenant: "kielregion", offerId: "o-123" },
         user: { id: "lena@example.de" },
-        body: { consent: true, motivation: "hi" },
+        body: { consent: "true", motivation: "hi" },
+        files: { file: CV() },
       },
       r,
     );
@@ -398,7 +421,25 @@ describe("ApplicationController", () => {
     expect(args[0]).to.equal("kielregion");
     expect(args[1]).to.equal("lena@example.de");
     expect(args[2]).to.equal("o-123");
-    expect(args[3]).to.deep.equal({ consent: true, motivation: "hi" });
+    expect(args[3]).to.deep.equal({ motivation: "hi", consent: true });
+    expect(NextcloudManager.createFile.calledOnce).to.equal(true);
+    expect(ApplicationService.addDocumentRef.calledOnce).to.equal(true);
+    expect(ApplicationService.deleteApplication.called).to.equal(false);
+  });
+
+  it("submit rejects a missing CV with 400 and never creates the application", async () => {
+    const r = res();
+    await ApplicationController.submit(
+      {
+        params: { tenant: "kielregion", offerId: "o-123" },
+        user: { id: "x@y.de" },
+        body: { consent: "true", motivation: "" },
+        files: {},
+      },
+      r,
+    );
+    expect(r.statusCode).to.equal(400);
+    expect(ApplicationService.submitApplication.called).to.equal(false);
   });
 
   it("submit maps a service error to its status", async () => {
@@ -411,11 +452,30 @@ describe("ApplicationController", () => {
       {
         params: { tenant: "kielregion", offerId: "o-123" },
         user: { id: "x@y.de" },
-        body: {},
+        body: { consent: "true" },
+        files: { file: CV() },
       },
       r,
     );
     expect(r.statusCode).to.equal(409);
+  });
+
+  it("rolls the application back when the CV file write fails", async () => {
+    NextcloudManager.createFile.rejects(new Error("nextcloud down"));
+    const r = res();
+    await ApplicationController.submit(
+      {
+        params: { tenant: "kielregion", offerId: "o-123" },
+        user: { id: "x@y.de" },
+        body: { consent: "true", motivation: "hi" },
+        files: { file: CV() },
+      },
+      r,
+    );
+    expect(
+      ApplicationService.deleteApplication.calledOnceWith("kielregion", "a-1"),
+    ).to.equal(true);
+    expect(r.statusCode).to.equal(500);
   });
 
   it("listMine returns 200 with the acting student's applications", async () => {

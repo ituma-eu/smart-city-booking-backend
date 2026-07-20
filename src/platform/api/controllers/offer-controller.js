@@ -114,6 +114,21 @@ class OfferController {
       ) {
         return response.sendStatus(403);
       }
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (
+        !(await CompanyController.hasAdminPermission(
+          access,
+          request.user.id,
+          tenantId,
+          "offers:create",
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
       const offer = await OfferService.createOffer(
         tenantId,
         companyId,
@@ -140,6 +155,21 @@ class OfferController {
           tenantId,
           companyId,
           existing.branchId,
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (
+        !(await CompanyController.hasAdminPermission(
+          access,
+          request.user.id,
+          tenantId,
+          "offers:edit",
         ))
       ) {
         return response.sendStatus(403);
@@ -197,13 +227,20 @@ class OfferController {
       ) {
         return response.sendStatus(403);
       }
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
       if (
-        existing.status === "Archiv" &&
-        !(await CompanyController.isTenantAdmin(request.user.id, tenantId))
+        !(await CompanyController.hasAdminPermission(
+          access,
+          request.user.id,
+          tenantId,
+          "offers:delete",
+        ))
       ) {
-        return response
-          .status(403)
-          .send("Archived offers can only be changed by an admin");
+        return response.sendStatus(403);
       }
       const media = await OfferService.listOfferMedia(tenantId, offerId);
       const result = await OfferService.deleteOffer(
@@ -239,6 +276,21 @@ class OfferController {
       ) {
         return response.sendStatus(403);
       }
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (
+        !(await CompanyController.hasAdminPermission(
+          access,
+          request.user.id,
+          tenantId,
+          "offers:edit",
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
       const offer = await OfferService.archiveOffer(
         tenantId,
         companyId,
@@ -247,6 +299,55 @@ class OfferController {
       return response.status(200).send(offer);
     } catch (error) {
       return OfferController._fail(response, error, "Could not archive offer");
+    }
+  }
+
+  static async reactivateCompanyOffer(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      const companyId = request.params.id;
+      const offerId = request.params.offerId;
+      const existing = await OfferManager.getOffer(tenantId, offerId);
+      if (!existing || existing.companyId !== companyId) {
+        return response.sendStatus(404);
+      }
+      if (
+        !(await CompanyController.canEditBranch(
+          request.user.id,
+          tenantId,
+          companyId,
+          existing.branchId,
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (
+        !(await CompanyController.hasAdminPermission(
+          access,
+          request.user.id,
+          tenantId,
+          "offers:edit",
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
+      const offer = await OfferService.reactivateCompanyOffer(
+        tenantId,
+        companyId,
+        offerId,
+      );
+      return response.status(200).send(offer);
+    } catch (error) {
+      return OfferController._fail(
+        response,
+        error,
+        "Could not reactivate offer",
+      );
     }
   }
 
@@ -321,11 +422,22 @@ class OfferController {
       }
       const str = (v) =>
         v === undefined || v === null || v === "" ? undefined : String(v);
-      const offers = await OfferService.listForModeration(tenantId, {
+      const filters = {
         status: str(request.query.status),
         industryId: str(request.query.industryId),
         q: str(request.query.q),
-      });
+      };
+      // Opt-in pagination: with `limit` the response is { items, total }.
+      const limit = parseInt(request.query.limit, 10);
+      if (Number.isFinite(limit) && limit > 0) {
+        filters.limit = Math.min(limit, 100);
+        filters.offset = Math.max(0, parseInt(request.query.offset, 10) || 0);
+        // Sort field is validated against an allow-list in the manager; an
+        // unknown value falls back to the default (created desc).
+        filters.sort = str(request.query.sort);
+        filters.dir = request.query.dir === "asc" ? "asc" : "desc";
+      }
+      const offers = await OfferService.listForModeration(tenantId, filters);
       return response.status(200).send(offers);
     } catch (error) {
       return OfferController._fail(response, error, "Could not list offers");
@@ -423,6 +535,21 @@ class OfferController {
       offer.branchId,
     );
     if (!allowed) {
+      return { error: 403 };
+    }
+    const access = await CompanyController.getBranchAccess(
+      request.user.id,
+      tenantId,
+      companyId,
+    );
+    if (
+      !(await CompanyController.hasAdminPermission(
+        access,
+        request.user.id,
+        tenantId,
+        "offers:edit",
+      ))
+    ) {
       return { error: 403 };
     }
     return { offer };

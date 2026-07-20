@@ -87,6 +87,10 @@ class ApplicationManager {
     return counts;
   }
 
+  static async removeById(tenantId, id) {
+    await ApplicationModel.deleteOne({ tenantId, id });
+  }
+
   static async removeByOffer(tenantId, offerId) {
     await ApplicationModel.deleteMany({ tenantId, offerId });
   }
