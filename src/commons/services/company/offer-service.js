@@ -2,11 +2,14 @@ const { v4: uuidv4 } = require("uuid");
 const { isEmail } = require("validator");
 const OfferManager = require("../../data-managers/offer-manager");
 const OfferMediaManager = require("../../data-managers/offer-media-manager");
+const OfferBookmarkManager = require("../../data-managers/offer-bookmark-manager");
 const CompanyManager = require("../../data-managers/company-manager");
 const CompanyBranchManager = require("../../data-managers/company-branch-manager");
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
 const PlatformSettingsService = require("../platform-settings-service");
 const ApplicationService = require("../student/application-service");
+const ApplicationManager = require("../../data-managers/application-manager");
+const AuditLogService = require("../audit-log-service");
 
 const CONTACT_CHANNELS = [
   "Direktbewerbung über Plattform",
@@ -265,6 +268,11 @@ class OfferService {
       views: 0,
       publishedAt: resolved.publishedAt,
     });
+    await AuditLogService.record(
+      tenantId,
+      "create",
+      `Praktikum „${offer.title}" angelegt`,
+    );
     return toOfferDto(offer);
   }
 
@@ -334,6 +342,15 @@ class OfferService {
       created: existing.created,
       views: existing.views,
     });
+    if (existing.status === "Entwurf" && offer.status !== "Entwurf") {
+      await AuditLogService.record(
+        tenantId,
+        "update",
+        offer.status === "Online"
+          ? `Praktikum „${offer.title}" veröffentlicht`
+          : `Praktikum „${offer.title}" zur Prüfung eingereicht`,
+      );
+    }
     return toOfferDto(offer);
   }
 
@@ -420,8 +437,14 @@ class OfferService {
       throw { message: "Offer not found", status: 404 };
     }
     await ApplicationService.deleteByOffer(tenantId, offerId);
+    await OfferBookmarkManager.removeByOffer(tenantId, offerId);
     await OfferMediaManager.removeByOffer(tenantId, offerId);
     await OfferManager.removeOffer(tenantId, offerId);
+    await AuditLogService.record(
+      tenantId,
+      "delete",
+      `Praktikum „${offer.title}" gelöscht`,
+    );
     return { removed: offerId };
   }
 
@@ -468,8 +491,17 @@ class OfferService {
   }
 
   static async listForModeration(tenantId, filters) {
-    const offers = await OfferManager.listForModeration(tenantId, filters);
-    return offers.map(toOfferDto);
+    const result = await OfferManager.listForModeration(tenantId, filters);
+    const offers = Array.isArray(result) ? result : result.items;
+    const counts = await ApplicationManager.countByOffers(
+      tenantId,
+      offers.map((o) => o.id),
+    );
+    const dtos = offers.map((offer) => ({
+      ...toOfferDto(offer),
+      applicationCount: counts[offer.id] || 0,
+    }));
+    return Array.isArray(result) ? dtos : { items: dtos, total: result.total };
   }
 
   static async approveOffer(tenantId, offerId) {
@@ -486,6 +518,11 @@ class OfferService {
       publishedAt: offer.publishedAt || Date.now(),
       reviewNote: "",
     });
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Praktikum „${updated.title}" freigegeben (Online)`,
+    );
     return toOfferDto(updated);
   }
 
@@ -506,6 +543,11 @@ class OfferService {
       status: "Entwurf",
       reviewNote,
     });
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Praktikum „${updated.title}" abgelehnt`,
+    );
     return toOfferDto(updated);
   }
 
@@ -521,6 +563,82 @@ class OfferService {
       ...offer,
       status: "Archiv",
     });
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Praktikum „${updated.title}" archiviert`,
+    );
+    return toOfferDto(updated);
+  }
+
+  static async reactivateOffer(tenantId, offerId) {
+    const offer = await OfferManager.getOffer(tenantId, offerId);
+    if (!offer) {
+      throw { message: "Offer not found", status: 404 };
+    }
+    if (offer.status !== "Archiv") {
+      throw {
+        message: "Only archived offers can be reactivated",
+        status: 409,
+      };
+    }
+    const updated = await OfferManager.storeOffer({
+      ...offer,
+      status: "Online",
+      publishedAt: Date.now(),
+    });
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Praktikum „${updated.title}" wieder online gestellt`,
+    );
+    return toOfferDto(updated);
+  }
+
+  // Company-side archive (Online → Archiv), scoped to the offer's company.
+  // The reverse (Archiv → Online) is available to the company via
+  // reactivateCompanyOffer and to admins via reactivateOffer.
+  static async archiveOffer(tenantId, companyId, offerId) {
+    const offer = await OfferManager.getOffer(tenantId, offerId);
+    if (!offer || offer.companyId !== companyId) {
+      throw { message: "Offer not found", status: 404 };
+    }
+    if (offer.status !== "Online") {
+      throw { message: "Only online offers can be archived", status: 409 };
+    }
+    const updated = await OfferManager.storeOffer({
+      ...offer,
+      status: "Archiv",
+    });
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Praktikum „${updated.title}" archiviert`,
+    );
+    return toOfferDto(updated);
+  }
+
+  // Company-side reactivate (Archiv → Online), the reverse of archiveOffer.
+  // A previously-approved (Online) listing returns straight to Online; only
+  // Archiv offers qualify.
+  static async reactivateCompanyOffer(tenantId, companyId, offerId) {
+    const offer = await OfferManager.getOffer(tenantId, offerId);
+    if (!offer || offer.companyId !== companyId) {
+      throw { message: "Offer not found", status: 404 };
+    }
+    if (offer.status !== "Archiv") {
+      throw { message: "Only archived offers can be reactivated", status: 409 };
+    }
+    const updated = await OfferManager.storeOffer({
+      ...offer,
+      status: "Online",
+      publishedAt: Date.now(),
+    });
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Praktikum „${updated.title}" wieder online gestellt`,
+    );
     return toOfferDto(updated);
   }
 

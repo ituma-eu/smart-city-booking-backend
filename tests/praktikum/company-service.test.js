@@ -13,6 +13,8 @@ describe("CompanyService", () => {
   let CompanyMemberManager;
   let CompanyRoleService;
   let MailController;
+  let MemberInvitationManager;
+  let JwtHelper;
   let CompanyService;
 
   const validPayload = () => ({
@@ -50,6 +52,7 @@ describe("CompanyService", () => {
       addMembership: sandbox.stub().resolves(),
       updateMembership: sandbox.stub().resolves(),
       addRoleToMembership: sandbox.stub().resolves(),
+      removeRoleFromMembership: sandbox.stub().resolves(),
     };
     TenantManager = {
       getTenant: sandbox.stub().resolves({ id: "kielregion" }),
@@ -70,7 +73,13 @@ describe("CompanyService", () => {
     };
     MailController = {
       sendVerificationRequest: sandbox.stub().resolves(),
+      sendMemberInvitation: sandbox.stub().resolves(),
     };
+    MemberInvitationManager = {
+      getPendingByEmailInTenant: sandbox.stub().resolves(null),
+      store: sandbox.stub().callsFake(async (invitation) => invitation),
+    };
+    JwtHelper = { revokeAllUserTokens: sandbox.stub().resolves() };
 
     mock("../../src/commons/data-managers/user-manager", UserManager);
     mock("../../src/commons/services/user-service", UserService);
@@ -92,6 +101,11 @@ describe("CompanyService", () => {
       CompanyRoleService,
     });
     mock("../../src/commons/mail-service/mail-controller", MailController);
+    mock(
+      "../../src/commons/data-managers/member-invitation-manager",
+      MemberInvitationManager,
+    );
+    mock("../../src/commons/utilities/jwt-helper", JwtHelper);
 
     CompanyService = mock.reRequire(
       "../../src/commons/services/company/company-service",
@@ -361,6 +375,9 @@ describe("CompanyService", () => {
       expect(
         CompanyManager.setStatus.calledWith("kielregion", "c1", "blocked"),
       ).to.equal(true);
+      expect(
+        JwtHelper.revokeAllUserTokens.calledWith("a@x.de", "company_blocked"),
+      ).to.equal(true);
     });
 
     it("suspends the member user accounts so they can no longer log in", async () => {
@@ -459,6 +476,133 @@ describe("CompanyService", () => {
       }
       expect(error && error.status).to.equal(429);
       expect(MailController.sendVerificationRequest.calledOnce).to.equal(true);
+    });
+  });
+
+  describe("unverifyCompany", () => {
+    it("throws 404 when the company does not exist", async () => {
+      CompanyManager.getCompany.resolves(null);
+      let error;
+      try {
+        await CompanyService.unverifyCompany("kielregion", "c1");
+      } catch (e) {
+        error = e;
+      }
+      expect(error && error.status).to.equal(404);
+    });
+
+    it("reverts members to pending, removes the role and sets status unverified", async () => {
+      CompanyManager.getCompany.resolves({ id: "c1", status: "verified" });
+      CompanyMemberManager.getMembersByCompany.resolves([{ userId: "m@x.de" }]);
+      await CompanyService.unverifyCompany("kielregion", "c1");
+      expect(
+        MembershipManager.updateMembership.calledWith("kielregion", "m@x.de", {
+          status: "pending",
+        }),
+      ).to.equal(true);
+      expect(MembershipManager.removeRoleFromMembership.calledOnce).to.equal(
+        true,
+      );
+      expect(
+        CompanyManager.setStatus.calledWith("kielregion", "c1", "unverified"),
+      ).to.equal(true);
+    });
+
+    it("lifts a block-suspension (blocked → unverified un-suspends members)", async () => {
+      CompanyManager.getCompany.resolves({ id: "c1", status: "blocked" });
+      CompanyMemberManager.getMembersByCompany.resolves([{ userId: "m@x.de" }]);
+      UserManager.getUserBy.resolves({ id: "m@x.de", isSuspended: true });
+      await CompanyService.unverifyCompany("kielregion", "c1");
+      expect(UserManager.updateUser.calledOnce).to.equal(true);
+      expect(UserManager.updateUser.firstCall.args[0].isSuspended).to.equal(
+        false,
+      );
+    });
+  });
+
+  describe("adminCreateCompany", () => {
+    const payload = () => ({
+      owner: {
+        email: "Owner@Example.de",
+        firstName: "Anna",
+        lastName: "Berg",
+      },
+      company: {
+        name: "Neue Firma GmbH",
+        street: "Hauptstr. 1",
+        postalCode: "24103",
+        city: "Kiel",
+        phone: "0431 123456",
+      },
+    });
+
+    it("creates a verified company and a pending OWNER invitation", async () => {
+      const result = await CompanyService.adminCreateCompany(
+        "kielregion",
+        payload(),
+      );
+      expect(CompanyManager.storeCompany.calledOnce).to.equal(true);
+      expect(CompanyManager.storeCompany.firstCall.args[0].status).to.equal(
+        "verified",
+      );
+      const stored = MemberInvitationManager.store.firstCall.args[0];
+      expect(stored.isOwner).to.equal(true);
+      expect(stored.email).to.equal("owner@example.de");
+      expect(stored.status).to.equal("pending");
+      expect(result.invitation.isOwner).to.equal(true);
+    });
+
+    it("rejects an invalid owner email (400) and stores nothing", async () => {
+      const bad = payload();
+      bad.owner.email = "not-an-email";
+      let error;
+      try {
+        await CompanyService.adminCreateCompany("kielregion", bad);
+      } catch (e) {
+        error = e;
+      }
+      expect(error && error.status).to.equal(400);
+      expect(CompanyManager.storeCompany.called).to.equal(false);
+    });
+
+    it("rejects (409) when the email is already in use", async () => {
+      UserManager.getUserBy.resolves({ id: "owner@example.de" });
+      let error;
+      try {
+        await CompanyService.adminCreateCompany("kielregion", payload());
+      } catch (e) {
+        error = e;
+      }
+      expect(error && error.status).to.equal(409);
+      expect(CompanyManager.storeCompany.called).to.equal(false);
+    });
+
+    it("rejects (409) when a membership already exists in this tenant", async () => {
+      MembershipManager.getMembershipByTenantAndUserID.resolves({
+        userId: "owner@example.de",
+      });
+      let error;
+      try {
+        await CompanyService.adminCreateCompany("kielregion", payload());
+      } catch (e) {
+        error = e;
+      }
+      expect(error && error.status).to.equal(409);
+      expect(CompanyManager.storeCompany.called).to.equal(false);
+    });
+
+    it("rejects (409) when an invitation for this email is already pending", async () => {
+      MemberInvitationManager.getPendingByEmailInTenant.resolves({
+        id: "inv1",
+      });
+      let error;
+      try {
+        await CompanyService.adminCreateCompany("kielregion", payload());
+      } catch (e) {
+        error = e;
+      }
+      expect(error && error.status).to.equal(409);
+      expect(CompanyManager.storeCompany.called).to.equal(false);
     });
   });
 });

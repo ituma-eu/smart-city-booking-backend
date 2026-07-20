@@ -23,6 +23,31 @@ class TaxonomyTermManager {
     });
     return raw.map((doc) => doc.toEntity());
   }
+  static async createTerm(term) {
+    const doc = await TaxonomyTermModel.create(term);
+    return doc.toEntity();
+  }
+
+  static async updateTerm(tenantId, id, patch) {
+    await TaxonomyTermModel.updateOne({ tenantId, id }, { $set: patch });
+    return TaxonomyTermManager.getTerm(tenantId, id);
+  }
+
+  static async removeTerm(tenantId, id) {
+    const res = await TaxonomyTermModel.deleteOne({ tenantId, id });
+    return res.deletedCount > 0;
+  }
+
+  static async setSortOrders(tenantId, updates) {
+    await Promise.all(
+      updates.map((u) =>
+        TaxonomyTermModel.updateOne(
+          { tenantId, id: u.id },
+          { $set: { sortOrder: u.sortOrder } },
+        ),
+      ),
+    );
+  }
 }
 
 module.exports = TaxonomyTermManager;

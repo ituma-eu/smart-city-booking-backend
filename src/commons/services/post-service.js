@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require("uuid");
 const PostManager = require("../data-managers/post-manager");
+const AuditLogService = require("./audit-log-service");
 
 const AUDIENCES = ["students", "companies", "all"];
 const TYPES = ["article", "template", "link"];
@@ -84,11 +85,15 @@ class PostService {
     const limit = filters.limit
       ? Math.max(1, Math.min(100, Number(filters.limit) || 0))
       : undefined;
+    const offset = filters.offset
+      ? Math.max(0, Number(filters.offset) || 0)
+      : undefined;
     const posts = await PostManager.listPublished(tenantId, {
       audience,
       tag: filters.tag ? String(filters.tag).trim() : undefined,
       q: filters.q ? String(filters.q).trim() : undefined,
       limit,
+      offset,
     });
     return posts.map(toListDto);
   }
@@ -161,6 +166,11 @@ class PostService {
       created: now,
       updated: now,
     });
+    await AuditLogService.record(
+      tenantId,
+      "create",
+      `Info-Beitrag „${stored.title}" angelegt`,
+    );
     return toAdminDto(stored);
   }
 
@@ -221,6 +231,11 @@ class PostService {
     }
     next.updated = Date.now();
     const stored = await PostManager.store(next);
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Info-Beitrag „${stored.title}" bearbeitet`,
+    );
     return toAdminDto(stored);
   }
 
@@ -238,6 +253,13 @@ class PostService {
       next.publishedAt = Date.now();
     }
     const stored = await PostManager.store(next);
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      next.published
+        ? `Info-Beitrag „${stored.title}" veröffentlicht`
+        : `Info-Beitrag „${stored.title}" zurückgezogen`,
+    );
     return toAdminDto(stored);
   }
 
@@ -247,6 +269,11 @@ class PostService {
       throw { message: "Post not found", status: 404 };
     }
     await PostManager.remove(tenantId, id);
+    await AuditLogService.record(
+      tenantId,
+      "delete",
+      `Info-Beitrag „${post.title}" gelöscht`,
+    );
     return { removed: id };
   }
 

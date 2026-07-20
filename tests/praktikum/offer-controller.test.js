@@ -41,6 +41,7 @@ describe("OfferController", () => {
       canEditBranch: sandbox.stub().resolves(true),
       isTenantAdmin: sandbox.stub().resolves(true),
       getBranchAccess: sandbox.stub().resolves({ isAdmin: true, member: null }),
+      hasAdminPermission: sandbox.stub().resolves(true),
       _memberBranchScope: sandbox.stub().returns(null),
     };
     OfferService = {
@@ -56,6 +57,9 @@ describe("OfferController", () => {
       approveOffer: sandbox.stub().resolves({ id: "o1" }),
       rejectOffer: sandbox.stub().resolves({ id: "o1" }),
       deactivateOffer: sandbox.stub().resolves({ id: "o1" }),
+      reactivateOffer: sandbox.stub().resolves({ id: "o1" }),
+      archiveOffer: sandbox.stub().resolves({ id: "o1" }),
+      reactivateCompanyOffer: sandbox.stub().resolves({ id: "o1" }),
       listOfferMedia: sandbox.stub().resolves([]),
       addOfferMedia: sandbox.stub().resolves({ id: "m1" }),
       removeOfferMedia: sandbox.stub().resolves({
@@ -219,6 +223,38 @@ describe("OfferController", () => {
       expect(r.statusCode).to.equal(403);
     });
 
+    it("listModeration forwards pagination + sort to the service", async () => {
+      await OfferController.listModeration(
+        req({
+          query: { limit: "10", offset: "20", sort: "views", dir: "asc" },
+        }),
+        res(),
+      );
+      const filters = OfferService.listForModeration.firstCall.args[1];
+      expect(filters.limit).to.equal(10);
+      expect(filters.offset).to.equal(20);
+      expect(filters.sort).to.equal("views");
+      expect(filters.dir).to.equal("asc");
+    });
+
+    it("listModeration defaults dir to desc and only sorts when paginating", async () => {
+      await OfferController.listModeration(
+        req({ query: { limit: "10", dir: "sideways", sort: "views" } }),
+        res(),
+      );
+      expect(OfferService.listForModeration.firstCall.args[1].dir).to.equal(
+        "desc",
+      );
+
+      await OfferController.listModeration(
+        req({ query: { sort: "views" } }),
+        res(),
+      );
+      const full = OfferService.listForModeration.secondCall.args[1];
+      expect(full.limit).to.equal(undefined);
+      expect(full.sort).to.equal(undefined);
+    });
+
     it("approveOffer -> 403 for a non-admin, 200 for an admin", async () => {
       CompanyController.isTenantAdmin.resolves(false);
       const r1 = res();
@@ -228,6 +264,72 @@ describe("OfferController", () => {
       const r2 = res();
       await OfferController.approveOffer(req(), r2);
       expect(r2.statusCode).to.equal(200);
+    });
+
+    it("createOffer -> enforces the offers:create permission", async () => {
+      const r = res();
+      await OfferController.createOffer(req({ body: { title: "X" } }), r);
+      expect(r.statusCode).to.equal(201);
+      expect(CompanyController.hasAdminPermission.firstCall.args[3]).to.equal(
+        "offers:create",
+      );
+    });
+
+    it("createOffer -> 403 for an admin lacking offers:create (service untouched)", async () => {
+      CompanyController.hasAdminPermission.resolves(false);
+      const r = res();
+      await OfferController.createOffer(req({ body: { title: "X" } }), r);
+      expect(r.statusCode).to.equal(403);
+      expect(OfferService.createOffer.called).to.equal(false);
+    });
+
+    it("updateOffer -> 403 for an admin lacking offers:edit", async () => {
+      CompanyController.hasAdminPermission.resolves(false);
+      const r = res();
+      await OfferController.updateOffer(req(), r);
+      expect(r.statusCode).to.equal(403);
+      expect(OfferService.updateOffer.called).to.equal(false);
+    });
+
+    it("deleteOffer -> 403 for an admin lacking offers:delete", async () => {
+      CompanyController.hasAdminPermission.resolves(false);
+      const r = res();
+      await OfferController.deleteOffer(req(), r);
+      expect(r.statusCode).to.equal(403);
+      expect(OfferService.deleteOffer.called).to.equal(false);
+    });
+
+    it("archiveOffer -> 403 for an admin lacking offers:edit", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        branchId: "b1",
+        status: "Online",
+      });
+      CompanyController.hasAdminPermission.resolves(false);
+      const r = res();
+      await OfferController.archiveOffer(req(), r);
+      expect(r.statusCode).to.equal(403);
+      expect(OfferService.archiveOffer.called).to.equal(false);
+    });
+
+    it("offer media upload -> 403 for an admin lacking offers:edit, before any upload", async () => {
+      CompanyController.hasAdminPermission.resolves(false);
+      const r = res();
+      await OfferController.uploadMedia(
+        req({
+          files: {
+            file: {
+              name: "logo.png",
+              mimetype: "image/png",
+              data: Buffer.from("abc"),
+            },
+          },
+        }),
+        r,
+      );
+      expect(r.statusCode).to.equal(403);
+      expect(NextcloudManager.createFile.called).to.equal(false);
     });
   });
 
@@ -372,6 +474,112 @@ describe("OfferController", () => {
       expect(r.statusCode).to.equal(200);
       expect(NextcloudManager.deleteFile.callCount).to.equal(2);
       expect(OfferService.deleteOffer.calledOnce).to.equal(true);
+    });
+  });
+
+  describe("company archive + archived lock", () => {
+    it("archiveOffer -> 200 for an authorized company manager", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        branchId: "b1",
+        status: "Online",
+      });
+      const r = res();
+      await OfferController.archiveOffer(req(), r);
+      expect(r.statusCode).to.equal(200);
+      expect(OfferService.archiveOffer.calledWith("kg", "c1", "o1")).to.equal(
+        true,
+      );
+    });
+
+    it("archiveOffer -> 404 for another company's offer", async () => {
+      OfferManager.getOffer.resolves({ id: "o1", companyId: "other" });
+      const r = res();
+      await OfferController.archiveOffer(req(), r);
+      expect(r.statusCode).to.equal(404);
+    });
+
+    it("archiveOffer -> 403 without branch edit rights", async () => {
+      CompanyController.canEditBranch.resolves(false);
+      const r = res();
+      await OfferController.archiveOffer(req(), r);
+      expect(r.statusCode).to.equal(403);
+      expect(OfferService.archiveOffer.called).to.equal(false);
+    });
+
+    it("reactivateCompanyOffer -> 200 for an authorized company manager", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        branchId: "b1",
+        status: "Archiv",
+      });
+      CompanyController.isTenantAdmin.resolves(false);
+      const r = res();
+      await OfferController.reactivateCompanyOffer(req(), r);
+      expect(r.statusCode).to.equal(200);
+      expect(
+        OfferService.reactivateCompanyOffer.calledWith("kg", "c1", "o1"),
+      ).to.equal(true);
+    });
+
+    it("reactivateCompanyOffer -> 404 for another company's offer", async () => {
+      OfferManager.getOffer.resolves({ id: "o1", companyId: "other" });
+      const r = res();
+      await OfferController.reactivateCompanyOffer(req(), r);
+      expect(r.statusCode).to.equal(404);
+      expect(OfferService.reactivateCompanyOffer.called).to.equal(false);
+    });
+
+    it("reactivateCompanyOffer -> 403 without branch edit rights", async () => {
+      CompanyController.canEditBranch.resolves(false);
+      const r = res();
+      await OfferController.reactivateCompanyOffer(req(), r);
+      expect(r.statusCode).to.equal(403);
+      expect(OfferService.reactivateCompanyOffer.called).to.equal(false);
+    });
+
+    it("updateOffer -> 403 on an archived offer for a non-admin", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        branchId: "b1",
+        status: "Archiv",
+      });
+      CompanyController.isTenantAdmin.resolves(false);
+      const r = res();
+      await OfferController.updateOffer(req(), r);
+      expect(r.statusCode).to.equal(403);
+      expect(OfferService.updateOffer.called).to.equal(false);
+    });
+
+    it("updateOffer -> 200 on an archived offer for an admin", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        branchId: "b1",
+        status: "Archiv",
+      });
+      const r = res();
+      await OfferController.updateOffer(req(), r);
+      expect(r.statusCode).to.equal(200);
+    });
+
+    it("deleteOffer -> 200 on an archived offer for the company (owner/member), not admin-only", async () => {
+      OfferManager.getOffer.resolves({
+        id: "o1",
+        companyId: "c1",
+        branchId: "b1",
+        status: "Archiv",
+      });
+      CompanyController.isTenantAdmin.resolves(false);
+      const r = res();
+      await OfferController.deleteOffer(req(), r);
+      expect(r.statusCode).to.equal(200);
+      expect(OfferService.deleteOffer.calledWith("kg", "c1", "o1")).to.equal(
+        true,
+      );
     });
   });
 });

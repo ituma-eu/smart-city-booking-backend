@@ -19,19 +19,20 @@ describe("ApplicationService — company inbox + status", () => {
       getById: sandbox.stub(),
       updateStatus: sandbox.stub().resolves(),
     };
-    OfferManager = { getOffersByIds: sandbox.stub().resolves([]) };
+    OfferManager = {
+      getOffersByIds: sandbox.stub().resolves([]),
+      getOffer: sandbox.stub().resolves(null),
+    };
     CompanyBranchManager = {
       getBranchesByCompany: sandbox.stub().resolves([]),
     };
     TaxonomyTermManager = {
-      getTerms: sandbox
-        .stub()
-        .resolves([
-          { name: "Neu" },
-          { name: "In Prüfung" },
-          { name: "Eingeladen" },
-          { name: "Abgesagt" },
-        ]),
+      getTerms: sandbox.stub().resolves([
+        { id: "st-neu", name: "Neu" },
+        { id: "st-pruefung", name: "In Prüfung" },
+        { id: "st-eingeladen", name: "Eingeladen" },
+        { id: "st-abgesagt", name: "Abgesagt" },
+      ]),
     };
     mock(
       "../../src/commons/data-managers/application-manager",
@@ -71,7 +72,7 @@ describe("ApplicationService — company inbox + status", () => {
         phone: "0431",
         birthDate: "2008-03-14",
         motivation: "hi",
-        status: "Neu",
+        status: "st-neu",
         created: 111,
         documents: [
           {
@@ -86,7 +87,7 @@ describe("ApplicationService — company inbox + status", () => {
       },
     ]);
     OfferManager.getOffersByIds.resolves([
-      { id: "o-1", title: "IT", city: "Kiel", companyId: CO },
+      { id: "o-1", title: "IT", city: "Kiel", companyId: CO, branchId: "b-1" },
     ]);
     CompanyBranchManager.getBranchesByCompany.resolves([
       { id: "b-1", name: "HQ Kiel" },
@@ -99,6 +100,7 @@ describe("ApplicationService — company inbox + status", () => {
     expect(dto.applicant.email).to.equal("lena@x.de");
     expect(dto.applicant.age).to.be.a("number");
     expect(dto.motivation).to.equal("hi");
+    expect(dto.statusId).to.equal("st-neu");
     expect(dto.status).to.equal("Neu");
     expect(dto.documents[0]).to.include({
       id: "d-1",
@@ -134,6 +136,40 @@ describe("ApplicationService — company inbox + status", () => {
     expect(list.map((a) => a.id)).to.deep.equal(["a-1"]);
   });
 
+  it("uses the offer's CURRENT branch, not the value snapshotted on the application", async () => {
+    ApplicationManager.getByCompany.resolves([
+      {
+        id: "a-1",
+        offerId: "o-1",
+        companyId: CO,
+        branchId: "b-1",
+        documents: [],
+      },
+    ]);
+    OfferManager.getOffersByIds.resolves([
+      { id: "o-1", title: "IT", companyId: CO, branchId: "b-2" },
+    ]);
+    CompanyBranchManager.getBranchesByCompany.resolves([
+      { id: "b-1", name: "Alt" },
+      { id: "b-2", name: "Neu" },
+    ]);
+    const all = await ApplicationService.listCompanyApplications(T, CO, null);
+    expect(all[0].branchId).to.equal("b-2");
+    expect(all[0].branchName).to.equal("Neu");
+    const oldScope = await ApplicationService.listCompanyApplications(
+      T,
+      CO,
+      "b-1",
+    );
+    expect(oldScope).to.have.length(0);
+    const newScope = await ApplicationService.listCompanyApplications(
+      T,
+      CO,
+      "b-2",
+    );
+    expect(newScope.map((a) => a.id)).to.deep.equal(["a-1"]);
+  });
+
   it("updates the status for a company's own application", async () => {
     ApplicationManager.getById.resolves({
       id: "a-1",
@@ -144,13 +180,13 @@ describe("ApplicationService — company inbox + status", () => {
       T,
       CO,
       "a-1",
-      "Eingeladen",
+      "st-eingeladen",
       null,
     );
     expect(
-      ApplicationManager.updateStatus.calledWith(T, "a-1", "Eingeladen"),
+      ApplicationManager.updateStatus.calledWith(T, "a-1", "st-eingeladen"),
     ).to.equal(true);
-    expect(res).to.deep.equal({ id: "a-1", status: "Eingeladen" });
+    expect(res).to.deep.equal({ id: "a-1", status: "st-eingeladen" });
   });
 
   it("→ 400 on an invalid status", async () => {
@@ -178,7 +214,7 @@ describe("ApplicationService — company inbox + status", () => {
         T,
         CO,
         "a-1",
-        "Neu",
+        "st-neu",
         null,
       );
     } catch (e) {
@@ -200,7 +236,7 @@ describe("ApplicationService — company inbox + status", () => {
         T,
         CO,
         "a-1",
-        "Neu",
+        "st-neu",
         "b-1",
       );
     } catch (e) {
@@ -228,6 +264,7 @@ describe("ApplicationController — company inbox + documents", () => {
   let CompanyController;
   let PlatformSettingsService;
   let NextcloudManager;
+  let OfferManager;
   let ApplicationController;
 
   const res = () => ({
@@ -268,6 +305,7 @@ describe("ApplicationController — company inbox + documents", () => {
     CompanyController = {
       getBranchAccess: sandbox.stub().resolves({ isAdmin: true, member: null }),
       _memberBranchScope: sandbox.stub().returns(null),
+      isTenantAdmin: sandbox.stub().resolves(false),
     };
     PlatformSettingsService = {
       getSettings: sandbox
@@ -278,6 +316,11 @@ describe("ApplicationController — company inbox + documents", () => {
       createFile: sandbox.stub().resolves(),
       getFile: sandbox.stub().resolves(Buffer.from("%PDF-1.4")),
       deleteFile: sandbox.stub().resolves(),
+    };
+    OfferManager = {
+      getOffer: sandbox
+        .stub()
+        .resolves({ id: "o-1", companyId: "c-1", branchId: "b-1" }),
     };
     mock(
       "../../src/commons/services/student/application-service",
@@ -294,6 +337,7 @@ describe("ApplicationController — company inbox + documents", () => {
     mock("../../src/commons/data-managers/file-manager", {
       NextcloudManager,
     });
+    mock("../../src/commons/data-managers/offer-manager", OfferManager);
     ApplicationController = mock.reRequire(
       "../../src/platform/api/controllers/application-controller",
     );
@@ -429,32 +473,80 @@ describe("ApplicationController — company inbox + documents", () => {
     expect(r.statusCode).to.equal(413);
   });
 
-  it("uploadDocument → 400 when the document limit is reached", async () => {
+  const pdfUpload = (over = {}) =>
+    reqBase({
+      params: { id: "a-1" },
+      files: {
+        file: {
+          name: "cv.pdf",
+          mimetype: "application/pdf",
+          data: Buffer.from("%PDF-1.4"),
+        },
+      },
+      ...over,
+    });
+
+  it("uploadDocument → 400 once the CV plus maxDocsPerInternship extras are present", async () => {
+    // maxDocsPerInternship counts the extras beyond the CV, so the total cap is N + 1.
+    PlatformSettingsService.getSettings.resolves({
+      maxDocsPerInternship: 2,
+      maxDocSizeMb: 10,
+    });
     ApplicationService.getApplicationById.resolves({
       id: "a-1",
       studentUserId: "u-1",
-      documents: [
-        { id: "d1" },
-        { id: "d2" },
-        { id: "d3" },
-        { id: "d4" },
-        { id: "d5" },
-      ],
+      documents: [{ id: "d1" }, { id: "d2" }, { id: "d3" }],
     });
     const r = res();
-    await ApplicationController.uploadDocument(
-      reqBase({
-        params: { id: "a-1" },
-        files: {
-          file: {
-            name: "cv.pdf",
-            mimetype: "application/pdf",
-            data: Buffer.from("x"),
-          },
-        },
-      }),
-      r,
-    );
+    await ApplicationController.uploadDocument(pdfUpload(), r);
+    expect(r.statusCode).to.equal(400);
+    expect(NextcloudManager.createFile.called).to.equal(false);
+  });
+
+  it("uploadDocument → 201 while still below the CV + extras cap", async () => {
+    PlatformSettingsService.getSettings.resolves({
+      maxDocsPerInternship: 2,
+      maxDocSizeMb: 10,
+    });
+    ApplicationService.getApplicationById.resolves({
+      id: "a-1",
+      studentUserId: "u-1",
+      documents: [{ id: "d1" }, { id: "d2" }],
+    });
+    const r = res();
+    await ApplicationController.uploadDocument(pdfUpload(), r);
+    expect(r.statusCode).to.equal(201);
+    expect(NextcloudManager.createFile.calledOnce).to.equal(true);
+  });
+
+  it("uploadDocument → 201 for the CV when maxDocsPerInternship is 0 and none exist yet", async () => {
+    PlatformSettingsService.getSettings.resolves({
+      maxDocsPerInternship: 0,
+      maxDocSizeMb: 10,
+    });
+    ApplicationService.getApplicationById.resolves({
+      id: "a-1",
+      studentUserId: "u-1",
+      documents: [],
+    });
+    const r = res();
+    await ApplicationController.uploadDocument(pdfUpload(), r);
+    expect(r.statusCode).to.equal(201);
+    expect(NextcloudManager.createFile.calledOnce).to.equal(true);
+  });
+
+  it("uploadDocument → 400 when maxDocsPerInternship is 0 and the CV already exists (only 1 doc total)", async () => {
+    PlatformSettingsService.getSettings.resolves({
+      maxDocsPerInternship: 0,
+      maxDocSizeMb: 10,
+    });
+    ApplicationService.getApplicationById.resolves({
+      id: "a-1",
+      studentUserId: "u-1",
+      documents: [{ id: "d1" }],
+    });
+    const r = res();
+    await ApplicationController.uploadDocument(pdfUpload(), r);
     expect(r.statusCode).to.equal(400);
     expect(NextcloudManager.createFile.called).to.equal(false);
   });
@@ -483,8 +575,8 @@ describe("ApplicationController — company inbox + documents", () => {
     expect(r.statusCode).to.equal(201);
     expect(NextcloudManager.createFile.calledOnce).to.equal(true);
     const args = NextcloudManager.createFile.firstCall.args;
-    expect(args[4]).to.equal("application-documents/a-1");
-    expect(args[4].startsWith("protected/")).to.equal(false);
+    expect(args[0].subFolder).to.equal("application-documents/a-1");
+    expect(args[0].subFolder.startsWith("protected/")).to.equal(false);
     const ref = ApplicationService.addDocumentRef.firstCall.args[2];
     expect(ref.type).to.equal("lebenslauf");
     expect(ref.fileName).to.contain("application-documents/a-1/");
@@ -508,7 +600,10 @@ describe("ApplicationController — company inbox + documents", () => {
     );
     expect(r.statusCode).to.equal(200);
     expect(
-      NextcloudManager.getFile.calledWith("kielregion", "protected/x"),
+      NextcloudManager.getFile.calledWith({
+        tenant: "kielregion",
+        filename: "protected/x",
+      }),
     ).to.equal(true);
     expect(r.headers["Content-Type"]).to.equal("application/pdf");
   });
@@ -556,7 +651,10 @@ describe("ApplicationController — company inbox + documents", () => {
     );
     expect(r.statusCode).to.equal(200);
     expect(
-      NextcloudManager.getFile.calledWith("kielregion", "protected/x"),
+      NextcloudManager.getFile.calledWith({
+        tenant: "kielregion",
+        filename: "protected/x",
+      }),
     ).to.equal(true);
   });
 
@@ -599,6 +697,38 @@ describe("ApplicationController — company inbox + documents", () => {
       member: { branchId: "b-2" },
     });
     CompanyController._memberBranchScope.returns("b-2");
+    const r = res();
+    await ApplicationController.downloadDocument(
+      reqBase({ params: { id: "a-1", docId: "d-1" } }),
+      r,
+    );
+    expect(r.statusCode).to.equal(403);
+    expect(NextcloudManager.getFile.called).to.equal(false);
+  });
+
+  it("downloadDocument scopes by the offer's current branch, not the application snapshot", async () => {
+    // The offer moved from b-1 (still snapshotted on the application) to b-2, so
+    // a member scoped to the old branch b-1 must no longer reach its documents.
+    ApplicationService.getApplicationById.resolves({
+      id: "a-1",
+      studentUserId: "someone-else",
+      companyId: "c-1",
+      offerId: "o-1",
+      branchId: "b-1",
+      documents: [
+        { id: "d-1", fileName: "protected/x", originalName: "cv.pdf" },
+      ],
+    });
+    OfferManager.getOffer.resolves({
+      id: "o-1",
+      companyId: "c-1",
+      branchId: "b-2",
+    });
+    CompanyController.getBranchAccess.resolves({
+      isAdmin: false,
+      member: { branchId: "b-1" },
+    });
+    CompanyController._memberBranchScope.returns("b-1");
     const r = res();
     await ApplicationController.downloadDocument(
       reqBase({ params: { id: "a-1", docId: "d-1" } }),

@@ -8,6 +8,7 @@ const CompanyManager = require("../../data-managers/company-manager");
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
 const PlatformSettingsService = require("../platform-settings-service");
 const { NextcloudManager } = require("../../data-managers/file-manager");
+const AuditLogService = require("../audit-log-service");
 
 const MOTIVATION_MAX = 5000;
 
@@ -42,11 +43,12 @@ function toDocDto(tenantId, applicationId, doc) {
   };
 }
 
-function toListDto(tenantId, application, offer) {
+function toListDto(tenantId, application, offer, statusName) {
   return {
     id: application.id,
     offerId: application.offerId,
-    status: application.status,
+    statusId: application.status,
+    status: statusName,
     createdAt: application.created,
     offer: offer
       ? {
@@ -54,6 +56,7 @@ function toListDto(tenantId, application, offer) {
           title: offer.title,
           city: offer.city,
           companyId: offer.companyId,
+          status: offer.status,
         }
       : null,
     documents: (application.documents || []).map((doc) =>
@@ -62,12 +65,19 @@ function toListDto(tenantId, application, offer) {
   };
 }
 
-function toCompanyDto(tenantId, application, offer, branchName) {
+function toCompanyDto(
+  tenantId,
+  application,
+  offer,
+  branchName,
+  statusName,
+  branchId,
+) {
   return {
     id: application.id,
     offerId: application.offerId,
     offerTitle: offer ? offer.title : null,
-    branchId: application.branchId,
+    branchId: branchId !== undefined ? branchId : application.branchId,
     branchName: branchName || null,
     applicant: {
       firstName: application.firstName,
@@ -78,12 +88,21 @@ function toCompanyDto(tenantId, application, offer, branchName) {
       age: deriveAge(application.birthDate),
     },
     motivation: application.motivation,
-    status: application.status,
+    statusId: application.status,
+    status: statusName,
     createdAt: application.created,
     documents: (application.documents || []).map((doc) =>
       toDocDto(tenantId, application.id, doc),
     ),
   };
+}
+
+async function statusNameMap(tenantId) {
+  const terms = await TaxonomyTermManager.getTerms(tenantId, {
+    type: "application_status",
+    activeOnly: false,
+  });
+  return new Map(terms.map((term) => [term.id, term.name]));
 }
 
 function isDeadlinePassed(deadline) {
@@ -147,7 +166,7 @@ class ApplicationService {
     }
 
     const settings = await PlatformSettingsService.getSettings(tenantId);
-    const initialStatus = settings.defaultApplicationStatus || "Neu";
+    const initialStatus = settings.defaultApplicationStatus;
 
     const now = Date.now();
     let application;
@@ -184,6 +203,11 @@ class ApplicationService {
       throw err;
     }
 
+    await AuditLogService.record(
+      tenantId,
+      "create",
+      `${user.id} hat sich auf „${offer.title}" beworben`,
+    );
     return { id: application.id };
   }
 
@@ -201,19 +225,22 @@ class ApplicationService {
       applications.map((application) => application.offerId),
     );
     const byId = new Map(offers.map((offer) => [offer.id, offer]));
+    const names = await statusNameMap(tenantId);
     return applications.map((application) =>
-      toListDto(tenantId, application, byId.get(application.offerId) || null),
+      toListDto(
+        tenantId,
+        application,
+        byId.get(application.offerId) || null,
+        names.get(application.status) || "—",
+      ),
     );
   }
 
   static async listCompanyApplications(tenantId, companyId, branchScope) {
-    let applications = await ApplicationManager.getByCompany(
+    const applications = await ApplicationManager.getByCompany(
       tenantId,
       companyId,
     );
-    if (branchScope !== null && branchScope !== undefined) {
-      applications = applications.filter((a) => a.branchId === branchScope);
-    }
     if (applications.length === 0) {
       return [];
     }
@@ -222,21 +249,37 @@ class ApplicationService {
       applications.map((a) => a.offerId),
     );
     const offerById = new Map(offers.map((offer) => [offer.id, offer]));
+    // The branch follows the offer's CURRENT branch, not the value snapshotted
+    // on the application at submission — otherwise moving an offer to another
+    // branch leaves its applications filtering under the old one.
+    const branchOf = (a) => {
+      const offer = offerById.get(a.offerId);
+      return (offer ? offer.branchId : a.branchId) || "";
+    };
+    const scoped =
+      branchScope !== null && branchScope !== undefined
+        ? applications.filter((a) => branchOf(a) === branchScope)
+        : applications;
+    if (scoped.length === 0) {
+      return [];
+    }
     const branches = await CompanyBranchManager.getBranchesByCompany(
       tenantId,
       companyId,
     );
     const branchNameById = new Map(branches.map((b) => [b.id, b.name]));
-    return applications.map((application) =>
-      toCompanyDto(
+    const names = await statusNameMap(tenantId);
+    return scoped.map((application) => {
+      const branchId = branchOf(application);
+      return toCompanyDto(
         tenantId,
         application,
         offerById.get(application.offerId) || null,
-        application.branchId
-          ? branchNameById.get(application.branchId) || null
-          : null,
-      ),
-    );
+        branchId ? branchNameById.get(branchId) || null : null,
+        names.get(application.status) || "—",
+        branchId,
+      );
+    });
   }
 
   static async updateApplicationStatus(
@@ -249,7 +292,7 @@ class ApplicationService {
     const statusTerms = await TaxonomyTermManager.getTerms(tenantId, {
       type: "application_status",
     });
-    if (!statusTerms.some((term) => term.name === status)) {
+    if (!statusTerms.some((term) => term.id === status)) {
       throw { message: "Invalid status", status: 400 };
     }
     const application = await ApplicationManager.getById(
@@ -259,14 +302,21 @@ class ApplicationService {
     if (!application || application.companyId !== companyId) {
       throw { message: "Application not found", status: 404 };
     }
-    if (
-      branchScope !== null &&
-      branchScope !== undefined &&
-      application.branchId !== branchScope
-    ) {
-      throw { message: "Out of branch scope", status: 403 };
+    if (branchScope !== null && branchScope !== undefined) {
+      // Scope by the offer's CURRENT branch (see listCompanyApplications).
+      const offer = await OfferManager.getOffer(tenantId, application.offerId);
+      const branchId = (offer ? offer.branchId : application.branchId) || "";
+      if (branchId !== branchScope) {
+        throw { message: "Out of branch scope", status: 403 };
+      }
     }
     await ApplicationManager.updateStatus(tenantId, applicationId, status);
+    const statusName = statusTerms.find((term) => term.id === status).name;
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Bewerbung von ${application.email} auf „${statusName}" gesetzt`,
+    );
     return { id: applicationId, status };
   }
 
@@ -290,6 +340,19 @@ class ApplicationService {
       documentId,
     );
     return { removed: documentId };
+  }
+
+  // Removes a single application together with its uploaded document files.
+  // Used to roll back a submit whose mandatory CV upload failed, so a failed
+  // application never persists (all-or-nothing).
+  static async deleteApplication(tenantId, id) {
+    const application = await ApplicationManager.getById(tenantId, id);
+    if (!application) {
+      return { removed: 0 };
+    }
+    await ApplicationService._deleteDocumentFiles(tenantId, [application]);
+    await ApplicationManager.removeById(tenantId, id);
+    return { removed: 1 };
   }
 
   // Completely removes every application for an offer, including the uploaded

@@ -16,12 +16,27 @@ class OfferBookmarkManager {
     );
   }
 
+  static async setNote(tenantId, userId, offerId, note) {
+    await OfferBookmarkModel.updateOne(
+      { tenantId, userId, offerId },
+      {
+        $set: { note },
+        $setOnInsert: { tenantId, userId, offerId, created: Date.now() },
+      },
+      { upsert: true },
+    );
+  }
+
   static async remove(tenantId, userId, offerId) {
     await OfferBookmarkModel.deleteOne({ tenantId, userId, offerId });
   }
 
   static async removeByUser(userId) {
     await OfferBookmarkModel.deleteMany({ userId });
+  }
+
+  static async removeByOffer(tenantId, offerId) {
+    await OfferBookmarkModel.deleteMany({ tenantId, offerId });
   }
 }
 

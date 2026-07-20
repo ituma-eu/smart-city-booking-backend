@@ -12,7 +12,10 @@ const { NextcloudManager } = require("../../data-managers/file-manager");
 const { deleteFileByUrl } = require("../../utilities/file-url");
 const CompanyBranchManager = require("../../data-managers/company-branch-manager");
 const OfferManager = require("../../data-managers/offer-manager");
+const OfferMediaManager = require("../../data-managers/offer-media-manager");
+const OfferBookmarkManager = require("../../data-managers/offer-bookmark-manager");
 const MemberInvitationManager = require("../../data-managers/member-invitation-manager");
+const AuditLogService = require("../audit-log-service");
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
 const { CompanyRoleService } = require("./company-role-service");
 const ApplicationService = require("../student/application-service");
@@ -161,7 +164,7 @@ function toMemberInvitationDto(invitation) {
     lastName: invitation.lastName,
     phone: invitation.phone,
     branchId: invitation.branchId || "",
-    isOwner: false,
+    isOwner: invitation.isOwner === true,
     status: "pending",
   };
 }
@@ -359,6 +362,11 @@ class CompanyService {
       throw err;
     }
 
+    await AuditLogService.record(
+      tenantId,
+      "create",
+      `Unternehmen „${company.name}" registriert`,
+    );
     return company;
   }
 
@@ -436,6 +444,11 @@ class CompanyService {
     }
 
     await CompanyManager.setStatus(tenantId, companyId, "verified");
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Unternehmen „${company.name}" freigegeben`,
+    );
     return CompanyManager.getCompany(tenantId, companyId);
   }
 
@@ -454,10 +467,318 @@ class CompanyService {
         status: "suspended",
       });
       await setUserSuspended(member.userId, true);
+      await JwtHelper.revokeAllUserTokens(member.userId, "company_blocked");
     }
 
     await CompanyManager.setStatus(tenantId, companyId, "blocked");
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Unternehmen „${company.name}" gesperrt`,
+    );
     return CompanyManager.getCompany(tenantId, companyId);
+  }
+
+  // Revert an approval decision back to "unverified" (the neutral pending-review
+  // state). Reverses verifyCompany: members drop back to pending without the
+  // Unternehmen role, and any block-suspension is lifted (unverified is not blocked).
+  static async unverifyCompany(tenantId, companyId) {
+    const company = await CompanyManager.getCompany(tenantId, companyId);
+    if (!company) {
+      throw { message: "Company not found", status: 404 };
+    }
+
+    const role = await CompanyRoleService.ensureUnternehmenRole(tenantId);
+    const members = await CompanyMemberManager.getMembersByCompany(
+      tenantId,
+      companyId,
+    );
+    for (const member of members) {
+      await MembershipManager.updateMembership(tenantId, member.userId, {
+        status: "pending",
+      });
+      await MembershipManager.removeRoleFromMembership(
+        tenantId,
+        member.userId,
+        role.id,
+      );
+      await setUserSuspended(member.userId, false);
+    }
+
+    await CompanyManager.setStatus(tenantId, companyId, "unverified");
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Unternehmen „${company.name}" auf „nicht verifiziert" zurückgesetzt`,
+    );
+    return CompanyManager.getCompany(tenantId, companyId);
+  }
+
+  // Admin authoring of a company: created directly as "verified", with no owner
+  // password and no consents. The owner arrives through the existing member-invitation
+  // flow as a PENDING owner invitation and sets their own password via the link.
+  static async adminCreateCompany(tenantId, payload) {
+    const owner = payload.owner || {};
+    const companyData = payload.company || {};
+
+    const email = String(owner.id || owner.email || "")
+      .trim()
+      .toLowerCase();
+    const firstName = String(owner.firstName || "").trim();
+    const lastName = String(owner.lastName || "").trim();
+    const name = String(companyData.name || "").trim();
+    const street = String(companyData.street || "").trim();
+    const postalCode = String(companyData.postalCode || "").trim();
+    const city = String(companyData.city || "").trim();
+    const phone = String(companyData.phone || "").trim();
+    const website = String(companyData.website || "").trim();
+    const mail = String(companyData.mail || "").trim();
+    const hasLetter = (value) => /[A-Za-zÀ-ÿ]/.test(value);
+
+    if (!isEmail(email)) {
+      throw { message: "A valid owner email address is required", status: 400 };
+    }
+    if (
+      firstName.length < 2 ||
+      !hasLetter(firstName) ||
+      lastName.length < 2 ||
+      !hasLetter(lastName)
+    ) {
+      throw {
+        message: "A valid first and last name are required",
+        status: 400,
+      };
+    }
+    if (name.length < 2 || !hasLetter(name)) {
+      throw { message: "A valid company name is required", status: 400 };
+    }
+    if (street.length < 2 || !hasLetter(street)) {
+      throw { message: "A valid street is required", status: 400 };
+    }
+    if (!/^\d{5}$/.test(postalCode)) {
+      throw { message: "Postal code must be 5 digits", status: 400 };
+    }
+    if (city.length < 2 || !hasLetter(city)) {
+      throw { message: "A valid city is required", status: 400 };
+    }
+    if (phone.replace(/\D/g, "").length < 6) {
+      throw { message: "A valid phone number is required", status: 400 };
+    }
+    if (
+      website &&
+      !isURL(website, { protocols: ["https"], require_protocol: true })
+    ) {
+      throw { message: "Website must be a valid https:// URL", status: 400 };
+    }
+    if (mail && !isEmail(mail)) {
+      throw { message: "Invalid contact email", status: 400 };
+    }
+    if (String(companyData.description || "").length > DESCRIPTION_MAX_LENGTH) {
+      throw {
+        message: `Description must be at most ${DESCRIPTION_MAX_LENGTH} characters`,
+        status: 400,
+      };
+    }
+    const hasLat =
+      companyData.lat !== undefined &&
+      companyData.lat !== null &&
+      companyData.lat !== "";
+    const hasLng =
+      companyData.lng !== undefined &&
+      companyData.lng !== null &&
+      companyData.lng !== "";
+    let location = null;
+    if (hasLat || hasLng) {
+      if (!(hasLat && hasLng)) {
+        throw { message: "Both lat and lng are required", status: 400 };
+      }
+      location = buildLocation(companyData.lat, companyData.lng);
+    }
+
+    const tenant = await TenantManager.getTenant(tenantId);
+    if (!tenant) {
+      throw { message: "Tenant not found", status: 404 };
+    }
+
+    await assertTaxonomyRef(
+      tenantId,
+      companyData.districtId,
+      "district",
+      "Kreis",
+    );
+    await assertTaxonomyRef(
+      tenantId,
+      companyData.industryId,
+      "industry",
+      "Branche",
+    );
+    await assertTaxonomyRef(
+      tenantId,
+      companyData.sizeId,
+      "company_size",
+      "Unternehmensgröße",
+    );
+
+    const existingUser = await UserManager.getUserBy({ id: email });
+    if (existingUser) {
+      throw { message: "Email already in use", status: 409 };
+    }
+    const existingMembership =
+      await MembershipManager.getMembershipByTenantAndUserID(tenantId, email);
+    if (existingMembership) {
+      throw { message: "User already registered in this tenant", status: 409 };
+    }
+    const pendingInvitation =
+      await MemberInvitationManager.getPendingByEmailInTenant(tenantId, email);
+    if (pendingInvitation) {
+      throw {
+        message: "An invitation for this email is already pending",
+        status: 409,
+      };
+    }
+
+    const company = await CompanyManager.storeCompany({
+      id: uuidv4(),
+      tenantId,
+      name,
+      slug: companyData.slug,
+      status: "verified",
+      mail,
+      phone,
+      website,
+      street,
+      postalCode,
+      city,
+      districtId: companyData.districtId,
+      industryId: companyData.industryId,
+      sizeId: companyData.sizeId,
+      description: companyData.description,
+      location,
+    });
+
+    let invitation;
+    try {
+      const token = crypto.randomBytes(32).toString("hex");
+      invitation = await MemberInvitationManager.store({
+        id: uuidv4(),
+        tenantId,
+        companyId: company.id,
+        token,
+        email,
+        firstName,
+        lastName,
+        phone,
+        branchId: "",
+        isOwner: true,
+        status: "pending",
+        invitedBy: "admin",
+        expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      });
+      try {
+        await MailController.sendMemberInvitation({
+          sendTo: email,
+          companyName: company.name,
+          token,
+        });
+      } catch {
+        // mail is best-effort; the pending owner invitation can be re-sent or
+        // accepted via its link
+      }
+    } catch (err) {
+      await CompanyManager.deleteCompany(tenantId, company.id).catch(() => {});
+      throw err;
+    }
+
+    await AuditLogService.record(
+      tenantId,
+      "create",
+      `Unternehmen „${company.name}" durch Admin angelegt`,
+    );
+    return { company, invitation: toMemberInvitationDto(invitation) };
+  }
+
+  // Admin force-delete: removes a company regardless of its contents. Unlike the
+  // owner self-delete (deleteOwnerAccount), there is no 409 guard — every dependent
+  // record is purged explicitly (no Mongoose cascade hooks exist for these models).
+  static async adminDeleteCompany(tenantId, companyId) {
+    const company = await CompanyManager.getCompany(tenantId, companyId);
+    if (!company) {
+      throw { message: "Company not found", status: 404 };
+    }
+
+    const offers = await OfferManager.getOffersByCompany(tenantId, companyId);
+    for (const offer of offers) {
+      const offerMedia = await OfferMediaManager.getMediaByOffer(
+        tenantId,
+        offer.id,
+      );
+      for (const item of offerMedia) {
+        await deleteFileByUrl(tenantId, item.url);
+      }
+      await OfferMediaManager.removeByOffer(tenantId, offer.id);
+      await OfferBookmarkManager.removeByOffer(tenantId, offer.id);
+      await OfferManager.removeOffer(tenantId, offer.id);
+    }
+    await ApplicationService.deleteByCompany(tenantId, companyId);
+
+    const branches = await CompanyBranchManager.getBranchesByCompany(
+      tenantId,
+      companyId,
+    );
+    for (const branch of branches) {
+      await deleteFileByUrl(tenantId, branch.logoUrl);
+      await CompanyBranchManager.removeBranch(tenantId, branch.id);
+    }
+
+    const invitations = await MemberInvitationManager.getPendingByCompany(
+      tenantId,
+      companyId,
+    );
+    for (const invitation of invitations) {
+      await MemberInvitationManager.remove(tenantId, invitation.id);
+    }
+
+    const media = await CompanyMediaManager.getMediaByCompany(
+      tenantId,
+      companyId,
+    );
+    for (const item of media) {
+      if (item.fileName) {
+        await NextcloudManager.deleteFile(tenantId, item.fileName).catch(
+          () => {},
+        );
+      }
+      await CompanyMediaManager.removeMedia(tenantId, item.id);
+    }
+    await deleteFileByUrl(tenantId, company.logoUrl);
+
+    const members = await CompanyMemberManager.getMembersByCompany(
+      tenantId,
+      companyId,
+    );
+    for (const member of members) {
+      await JwtHelper.revokeAllUserTokens(member.userId, "company_deleted");
+      await MembershipManager.removeMembership(tenantId, member.userId);
+      await CompanyMemberManager.removeMember(
+        tenantId,
+        companyId,
+        member.userId,
+      );
+      const remaining = await MembershipManager.getMembershipsByUserID(
+        member.userId,
+      );
+      if (!remaining || remaining.length === 0) {
+        await UserManager.deleteUser(member.userId);
+      }
+    }
+
+    await CompanyManager.deleteCompany(tenantId, companyId);
+    await AuditLogService.record(
+      tenantId,
+      "delete",
+      `Unternehmen „${company.name}" durch Admin gelöscht`,
+    );
+    return { deleted: companyId };
   }
 
   static async updateCompanyProfile(tenantId, companyId, payload) {
@@ -542,6 +863,11 @@ class CompanyService {
     };
 
     await CompanyManager.storeCompany(updated);
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Unternehmen „${updated.name}" bearbeitet`,
+    );
     return CompanyManager.getCompany(tenantId, companyId);
   }
 
@@ -621,6 +947,11 @@ class CompanyService {
       companyId,
       ...fields,
     });
+    await AuditLogService.record(
+      tenantId,
+      "create",
+      `Zweigstelle „${branch.name}" bei „${company.name}" angelegt`,
+    );
     return toBranchDto(branch);
   }
 
@@ -637,6 +968,11 @@ class CompanyService {
       logoUrl: branch.logoUrl,
       created: branch.created,
     });
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Zweigstelle „${updated.name}" bearbeitet`,
+    );
     return toBranchDto(updated);
   }
 
@@ -677,6 +1013,11 @@ class CompanyService {
       };
     }
     await CompanyBranchManager.removeBranch(tenantId, branchId);
+    await AuditLogService.record(
+      tenantId,
+      "delete",
+      `Zweigstelle „${branch.name}" gelöscht`,
+    );
     return branch;
   }
 
@@ -767,6 +1108,11 @@ class CompanyService {
       // mail is best-effort; the pending invitation can be re-sent or accepted via its link
     }
 
+    await AuditLogService.record(
+      tenantId,
+      "create",
+      `${email} zu „${company.name}" eingeladen`,
+    );
     return toMemberInvitationDto(invitation);
   }
 
@@ -824,6 +1170,11 @@ class CompanyService {
       if (!remaining || remaining.length === 0) {
         await UserManager.deleteUser(userId);
       }
+      await AuditLogService.record(
+        tenantId,
+        "delete",
+        `Mitglied ${userId} entfernt`,
+      );
       return { removed: userId };
     }
     const pending = await MemberInvitationManager.getPendingByEmail(
@@ -839,6 +1190,11 @@ class CompanyService {
         };
       }
       await MemberInvitationManager.remove(tenantId, pending.id);
+      await AuditLogService.record(
+        tenantId,
+        "delete",
+        `Einladung an ${userId} zurückgezogen`,
+      );
       return { removed: userId };
     }
     throw { message: "Member not found", status: 404 };
@@ -921,6 +1277,11 @@ class CompanyService {
     if (!remaining || remaining.length === 0) {
       await UserManager.deleteUser(userId);
     }
+    await AuditLogService.record(
+      tenantId,
+      "delete",
+      `Unternehmen „${company.name}" durch Inhaber gelöscht`,
+    );
     return { deleted: userId };
   }
 
@@ -1022,7 +1383,7 @@ class CompanyService {
         tenantId,
         companyId: invitation.companyId,
         userId: email,
-        isOwner: false,
+        isOwner: invitation.isOwner === true,
         branchId,
       });
 
@@ -1040,6 +1401,11 @@ class CompanyService {
       await UserManager.deleteUser(email).catch(() => {});
       throw err;
     }
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      `Einladung von ${email} zu „${company.name}" angenommen`,
+    );
     return { companyId: invitation.companyId, userId: email };
   }
 }

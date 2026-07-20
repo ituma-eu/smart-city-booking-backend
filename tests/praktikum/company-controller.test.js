@@ -4,7 +4,7 @@ const sinon = require("sinon");
 
 describe("CompanyController — authz & handlers", () => {
   let sandbox;
-  let PermissionService;
+  let AdminAccessService;
   let CompanyMemberManager;
   let CompanyService;
   let CompanyManager;
@@ -36,7 +36,7 @@ describe("CompanyController — authz & handlers", () => {
     query: over.query || {},
   });
 
-  const asAdmin = () => PermissionService._allowUpdateAny.resolves(true);
+  const asAdmin = () => AdminAccessService.isAdmin.resolves(true);
   const asOwnerOf = (cid) =>
     CompanyMemberManager.getMemberByUser.resolves({
       companyId: cid,
@@ -50,7 +50,10 @@ describe("CompanyController — authz & handlers", () => {
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
-    PermissionService = { _allowUpdateAny: sandbox.stub().resolves(false) };
+    AdminAccessService = {
+      isAdmin: sandbox.stub().resolves(false),
+      hasPermission: sandbox.stub().resolves(true),
+    };
     CompanyMemberManager = { getMemberByUser: sandbox.stub().resolves(null) };
     CompanyService = {
       updateCompanyProfile: sandbox.stub().resolves({ id: "c1" }),
@@ -76,6 +79,14 @@ describe("CompanyController — authz & handlers", () => {
       acceptMemberInvitation: sandbox
         .stub()
         .resolves({ companyId: "c1", userId: "m@x.de" }),
+      unverifyCompany: sandbox
+        .stub()
+        .resolves({ id: "c1", status: "unverified" }),
+      adminCreateCompany: sandbox.stub().resolves({
+        company: { id: "c9", status: "verified" },
+        invitation: { email: "owner@x.de", isOwner: true },
+      }),
+      adminDeleteCompany: sandbox.stub().resolves({ deleted: "c1" }),
     };
     CompanyManager = {
       getCompany: sandbox
@@ -87,7 +98,10 @@ describe("CompanyController — authz & handlers", () => {
       deleteFile: sandbox.stub().resolves(),
     };
 
-    mock("../../src/commons/services/permission-service", PermissionService);
+    mock(
+      "../../src/commons/services/admin-access/admin-access-service",
+      AdminAccessService,
+    );
     mock(
       "../../src/commons/data-managers/company-member-manager",
       CompanyMemberManager,
@@ -724,12 +738,12 @@ describe("CompanyController — authz & handlers", () => {
           r,
         );
         expect(r.statusCode).to.equal(200);
-        expect(NextcloudManager.createFile.firstCall.args[2]).to.equal(
-          "b1-logo.png",
-        );
-        expect(NextcloudManager.createFile.firstCall.args[4]).to.equal(
-          "public/branch-logos",
-        );
+        expect(
+          NextcloudManager.createFile.firstCall.args[0].file.name,
+        ).to.equal("b1-logo.png");
+        expect(
+          NextcloudManager.createFile.firstCall.args[0].subFolder,
+        ).to.equal("public/branch-logos");
         expect(
           NextcloudManager.deleteFile.calledWith(
             "kielregion",
@@ -1159,10 +1173,10 @@ describe("CompanyController — authz & handlers", () => {
       await CompanyController.uploadLogo(req({ files: imgFile() }), r);
       expect(r.statusCode).to.equal(200);
       expect(NextcloudManager.createFile.calledOnce).to.equal(true);
-      expect(NextcloudManager.createFile.firstCall.args[2]).to.equal(
+      expect(NextcloudManager.createFile.firstCall.args[0].file.name).to.equal(
         "c1-logo.png",
       );
-      expect(NextcloudManager.createFile.firstCall.args[4]).to.equal(
+      expect(NextcloudManager.createFile.firstCall.args[0].subFolder).to.equal(
         "public/logos",
       );
       expect(CompanyService.setCompanyLogo.calledOnce).to.equal(true);
@@ -1235,7 +1249,7 @@ describe("CompanyController — authz & handlers", () => {
       const r = res();
       await CompanyController.uploadMedia(req({ files: mediaFile() }), r);
       expect(r.statusCode).to.equal(201);
-      expect(NextcloudManager.createFile.firstCall.args[4]).to.equal(
+      expect(NextcloudManager.createFile.firstCall.args[0].subFolder).to.equal(
         "public/media",
       );
       expect(CompanyService.addCompanyMedia.firstCall.args[2].type).to.equal(
@@ -1402,6 +1416,201 @@ describe("CompanyController — authz & handlers", () => {
       await CompanyController.listMedia(req(), r);
       expect(r.statusCode).to.equal(200);
       expect(r.body).to.have.length(2);
+    });
+  });
+
+  describe("unverify", () => {
+    it("→ 403 for a non-admin", async () => {
+      const r = res();
+      await CompanyController.unverify(req(), r);
+      expect(r.statusCode).to.equal(403);
+      expect(CompanyService.unverifyCompany.called).to.equal(false);
+    });
+
+    it("→ 200 for an admin and reverts the company", async () => {
+      asAdmin();
+      const r = res();
+      await CompanyController.unverify(req(), r);
+      expect(r.statusCode).to.equal(200);
+      expect(CompanyService.unverifyCompany.calledOnce).to.equal(true);
+    });
+  });
+
+  describe("adminCreate", () => {
+    it("→ 403 for a non-admin", async () => {
+      const r = res();
+      await CompanyController.adminCreate(
+        req({ body: { owner: {}, company: {} } }),
+        r,
+      );
+      expect(r.statusCode).to.equal(403);
+      expect(CompanyService.adminCreateCompany.called).to.equal(false);
+    });
+
+    it("→ 201 with the new id, status and owner invitation", async () => {
+      asAdmin();
+      const r = res();
+      await CompanyController.adminCreate(
+        req({ body: { owner: {}, company: {} } }),
+        r,
+      );
+      expect(r.statusCode).to.equal(201);
+      expect(r.body.id).to.equal("c9");
+      expect(r.body.status).to.equal("verified");
+      expect(r.body.invitation.isOwner).to.equal(true);
+      expect(CompanyService.adminCreateCompany.calledOnce).to.equal(true);
+    });
+  });
+
+  describe("adminDelete", () => {
+    it("→ 403 for a non-admin", async () => {
+      const r = res();
+      await CompanyController.adminDelete(req(), r);
+      expect(r.statusCode).to.equal(403);
+      expect(CompanyService.adminDeleteCompany.called).to.equal(false);
+    });
+
+    it("→ 200 for an admin and force-deletes", async () => {
+      asAdmin();
+      const r = res();
+      await CompanyController.adminDelete(req(), r);
+      expect(r.statusCode).to.equal(200);
+      expect(r.body.deleted).to.equal("c1");
+      expect(CompanyService.adminDeleteCompany.calledOnce).to.equal(true);
+    });
+  });
+
+  describe("granular admin permission gate (dual edit routes)", () => {
+    it("updateProfile — an admin WITH companies:edit edits (200) and the permission is checked", async () => {
+      asAdmin();
+      AdminAccessService.hasPermission.resolves(true);
+      const r = res();
+      await CompanyController.updateProfile(req({ body: { name: "X" } }), r);
+      expect(r.statusCode).to.equal(200);
+      expect(
+        AdminAccessService.hasPermission.calledWith(
+          "u1",
+          "kielregion",
+          "companies:edit",
+        ),
+      ).to.equal(true);
+    });
+
+    it("updateProfile — an admin WITHOUT companies:edit is blocked (403), service untouched", async () => {
+      asAdmin();
+      AdminAccessService.hasPermission.resolves(false);
+      const r = res();
+      await CompanyController.updateProfile(req({ body: { name: "X" } }), r);
+      expect(r.statusCode).to.equal(403);
+      expect(CompanyService.updateCompanyProfile.called).to.equal(false);
+    });
+
+    it("updateProfile — a company owner is unaffected (200, permission not consulted)", async () => {
+      asOwnerOf("c1");
+      AdminAccessService.hasPermission.resolves(false);
+      const r = res();
+      await CompanyController.updateProfile(req({ body: { name: "X" } }), r);
+      expect(r.statusCode).to.equal(200);
+      expect(AdminAccessService.hasPermission.called).to.equal(false);
+    });
+
+    it("createBranch — an admin WITHOUT companies:edit is blocked (403)", async () => {
+      asAdmin();
+      AdminAccessService.hasPermission.resolves(false);
+      const r = res();
+      await CompanyController.createBranch(req({ body: { name: "X" } }), r);
+      expect(r.statusCode).to.equal(403);
+      expect(CompanyService.createCompanyBranch.called).to.equal(false);
+    });
+
+    it("removeBranch — an admin WITHOUT companies:edit is blocked (403)", async () => {
+      asAdmin();
+      AdminAccessService.hasPermission.resolves(false);
+      const r = res();
+      await CompanyController.removeBranch(
+        req({ params: { branchId: "b1" } }),
+        r,
+      );
+      expect(r.statusCode).to.equal(403);
+      expect(CompanyService.removeCompanyBranch.called).to.equal(false);
+    });
+
+    it("updateBranch — an admin WITHOUT companies:edit is blocked (403)", async () => {
+      asAdmin();
+      AdminAccessService.hasPermission.resolves(false);
+      const r = res();
+      await CompanyController.updateBranch(
+        req({ params: { branchId: "b1" } }),
+        r,
+      );
+      expect(r.statusCode).to.equal(403);
+      expect(CompanyService.updateCompanyBranch.called).to.equal(false);
+    });
+
+    it("updateBranch — a branch-scoped member is unaffected (200, permission not consulted)", async () => {
+      CompanyMemberManager.getMemberByUser.resolves({
+        companyId: "c1",
+        isOwner: false,
+        branchId: "b1",
+      });
+      AdminAccessService.hasPermission.resolves(false);
+      const r = res();
+      await CompanyController.updateBranch(
+        req({ params: { branchId: "b1" } }),
+        r,
+      );
+      expect(r.statusCode).to.equal(200);
+      expect(AdminAccessService.hasPermission.called).to.equal(false);
+    });
+
+    it("uploadBranchLogo — an admin WITHOUT companies:edit is blocked before any upload (403)", async () => {
+      asAdmin();
+      AdminAccessService.hasPermission.resolves(false);
+      const r = res();
+      await CompanyController.uploadBranchLogo(
+        req({
+          params: { branchId: "b1" },
+          files: {
+            file: {
+              name: "logo.png",
+              mimetype: "image/png",
+              data: Buffer.from("x"),
+            },
+          },
+        }),
+        r,
+      );
+      expect(r.statusCode).to.equal(403);
+      expect(NextcloudManager.createFile.called).to.equal(false);
+    });
+
+    it("uploadMedia — an admin WITHOUT companies:edit is blocked before any upload (403)", async () => {
+      asAdmin();
+      AdminAccessService.hasPermission.resolves(false);
+      const r = res();
+      await CompanyController.uploadMedia(
+        req({
+          files: {
+            file: {
+              name: "shot.png",
+              mimetype: "image/png",
+              data: Buffer.from("x"),
+            },
+          },
+        }),
+        r,
+      );
+      expect(r.statusCode).to.equal(403);
+      expect(NextcloudManager.createFile.called).to.equal(false);
+    });
+
+    it("removeLogo — an admin WITHOUT companies:edit is blocked (403)", async () => {
+      asAdmin();
+      AdminAccessService.hasPermission.resolves(false);
+      const r = res();
+      await CompanyController.removeLogo(req(), r);
+      expect(r.statusCode).to.equal(403);
+      expect(CompanyService.removeCompanyLogo.called).to.equal(false);
     });
   });
 });

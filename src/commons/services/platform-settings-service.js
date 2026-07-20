@@ -1,6 +1,7 @@
 const PlatformSettings = require("../entities/settings/platformSettings");
 const PlatformSettingsManager = require("../data-managers/platform-settings-manager");
 const TaxonomyTermManager = require("../data-managers/taxonomy-term-manager");
+const AuditLogService = require("./audit-log-service");
 
 const TEXT_FIELDS = [
   "logoUrl",
@@ -36,7 +37,7 @@ class PlatformSettingsService {
       });
       if (
         !statusTerms.some(
-          (term) => term.name === payload.defaultApplicationStatus,
+          (term) => term.id === payload.defaultApplicationStatus,
         )
       ) {
         throw { message: "Invalid default application status", status: 400 };
@@ -63,7 +64,21 @@ class PlatformSettingsService {
         status: err.status || err.statusCode || 400,
       };
     }
-    return PlatformSettingsManager.store(entity);
+    const stored = await PlatformSettingsManager.store(entity);
+    const changed = [
+      "directPublishVerified",
+      "defaultApplicationStatus",
+      ...TEXT_FIELDS,
+      ...NUMBER_FIELDS,
+    ].filter((key) => entity[key] !== current[key]);
+    await AuditLogService.record(
+      tenantId,
+      "update",
+      changed.length
+        ? `Einstellungen aktualisiert: ${changed.join(", ")}`
+        : "Einstellungen aktualisiert",
+    );
+    return stored;
   }
 }
 

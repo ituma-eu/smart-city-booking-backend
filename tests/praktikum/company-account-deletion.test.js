@@ -108,6 +108,7 @@ describe("CompanyService — deleteOwnerAccount", () => {
   let CompanyBranchManager;
   let MemberInvitationManager;
   let OfferManager;
+  let OfferBookmarkManager;
   let UserManager;
   let MembershipManager;
   let ApplicationService;
@@ -148,6 +149,7 @@ describe("CompanyService — deleteOwnerAccount", () => {
       remove: sandbox.stub().resolves(),
     };
     OfferManager = { getOffersByCompany: sandbox.stub().resolves([]) };
+    OfferBookmarkManager = { removeByOffer: sandbox.stub().resolves() };
     UserManager = { deleteUser: sandbox.stub().resolves() };
     MembershipManager = {
       removeMembership: sandbox.stub().resolves(),
@@ -181,6 +183,10 @@ describe("CompanyService — deleteOwnerAccount", () => {
       MemberInvitationManager,
     );
     mock("../../src/commons/data-managers/offer-manager", OfferManager);
+    mock(
+      "../../src/commons/data-managers/offer-bookmark-manager",
+      OfferBookmarkManager,
+    );
     mock("../../src/commons/data-managers/user-manager", UserManager);
     mock(
       "../../src/commons/data-managers/membership-manager",
@@ -365,5 +371,203 @@ describe("CompanyService — deleteOwnerAccount", () => {
     expect(
       NextcloudManager.deleteFile.calledWith("kg", "/public/logos/logo.png"),
     ).to.equal(true);
+  });
+});
+
+describe("CompanyService — adminDeleteCompany (force cascade)", () => {
+  let sandbox;
+  let CompanyManager;
+  let CompanyMediaManager;
+  let NextcloudManager;
+  let CompanyMemberManager;
+  let CompanyBranchManager;
+  let MemberInvitationManager;
+  let OfferManager;
+  let OfferMediaManager;
+  let OfferBookmarkManager;
+  let UserManager;
+  let MembershipManager;
+  let ApplicationService;
+  let JwtHelper;
+  let CompanyService;
+
+  const T = "kg";
+  const CO = "c1";
+
+  beforeEach(() => {
+    sandbox = sinon.createSandbox();
+    CompanyManager = {
+      getCompany: sandbox
+        .stub()
+        .resolves({ id: CO, name: "Muster GmbH", logoUrl: "" }),
+      deleteCompany: sandbox.stub().resolves(),
+    };
+    CompanyMediaManager = {
+      getMediaByCompany: sandbox.stub().resolves([]),
+      removeMedia: sandbox.stub().resolves(),
+    };
+    NextcloudManager = { deleteFile: sandbox.stub().resolves() };
+    CompanyMemberManager = {
+      getMembersByCompany: sandbox.stub().resolves([]),
+      removeMember: sandbox.stub().resolves(),
+    };
+    CompanyBranchManager = {
+      getBranchesByCompany: sandbox.stub().resolves([]),
+      removeBranch: sandbox.stub().resolves(),
+    };
+    MemberInvitationManager = {
+      getPendingByCompany: sandbox.stub().resolves([]),
+      remove: sandbox.stub().resolves(),
+    };
+    OfferManager = {
+      getOffersByCompany: sandbox.stub().resolves([]),
+      removeOffer: sandbox.stub().resolves(),
+    };
+    OfferMediaManager = {
+      getMediaByOffer: sandbox.stub().resolves([]),
+      removeByOffer: sandbox.stub().resolves(),
+    };
+    OfferBookmarkManager = { removeByOffer: sandbox.stub().resolves() };
+    UserManager = { deleteUser: sandbox.stub().resolves() };
+    MembershipManager = {
+      removeMembership: sandbox.stub().resolves(),
+      getMembershipsByUserID: sandbox.stub().resolves([]),
+    };
+    ApplicationService = {
+      deleteByCompany: sandbox.stub().resolves({ removed: 0 }),
+    };
+    JwtHelper = { revokeAllUserTokens: sandbox.stub().resolves() };
+
+    mock("../../src/commons/data-managers/company-manager", CompanyManager);
+    mock(
+      "../../src/commons/data-managers/company-media-manager",
+      CompanyMediaManager,
+    );
+    mock("../../src/commons/data-managers/file-manager", { NextcloudManager });
+    mock(
+      "../../src/commons/data-managers/company-member-manager",
+      CompanyMemberManager,
+    );
+    mock(
+      "../../src/commons/data-managers/company-branch-manager",
+      CompanyBranchManager,
+    );
+    mock(
+      "../../src/commons/data-managers/member-invitation-manager",
+      MemberInvitationManager,
+    );
+    mock("../../src/commons/data-managers/offer-manager", OfferManager);
+    mock(
+      "../../src/commons/data-managers/offer-media-manager",
+      OfferMediaManager,
+    );
+    mock(
+      "../../src/commons/data-managers/offer-bookmark-manager",
+      OfferBookmarkManager,
+    );
+    mock("../../src/commons/data-managers/user-manager", UserManager);
+    mock(
+      "../../src/commons/data-managers/membership-manager",
+      MembershipManager,
+    );
+    mock(
+      "../../src/commons/services/student/application-service",
+      ApplicationService,
+    );
+    mock("../../src/commons/utilities/jwt-helper", JwtHelper);
+    mock("../../src/commons/services/company/company-role-service", {
+      CompanyRoleService: {},
+    });
+    mock("../../src/commons/mail-service/mail-controller", {});
+
+    CompanyService = mock.reRequire(
+      "../../src/commons/services/company/company-service",
+    );
+  });
+
+  afterEach(() => {
+    sandbox.restore();
+    mock.stopAll();
+  });
+
+  it("→ 404 when the company does not exist", async () => {
+    CompanyManager.getCompany.resolves(null);
+    let error;
+    try {
+      await CompanyService.adminDeleteCompany(T, CO);
+    } catch (e) {
+      error = e;
+    }
+    expect(error && error.status).to.equal(404);
+    expect(CompanyManager.deleteCompany.called).to.equal(false);
+  });
+
+  it("force-deletes offers, branches, invitations, members and the company", async () => {
+    OfferManager.getOffersByCompany.resolves([{ id: "o1" }, { id: "o2" }]);
+    CompanyBranchManager.getBranchesByCompany.resolves([
+      { id: "b1", logoUrl: "" },
+    ]);
+    MemberInvitationManager.getPendingByCompany.resolves([{ id: "i1" }]);
+    CompanyMemberManager.getMembersByCompany.resolves([
+      { userId: "owner@x.de", isOwner: true },
+      { userId: "m1@x.de", isOwner: false },
+    ]);
+
+    const res = await CompanyService.adminDeleteCompany(T, CO);
+
+    expect(OfferMediaManager.removeByOffer.callCount).to.equal(2);
+    expect(OfferBookmarkManager.removeByOffer.callCount).to.equal(2);
+    expect(OfferManager.removeOffer.callCount).to.equal(2);
+    expect(ApplicationService.deleteByCompany.calledWith(T, CO)).to.equal(true);
+    expect(CompanyBranchManager.removeBranch.calledWith(T, "b1")).to.equal(
+      true,
+    );
+    expect(MemberInvitationManager.remove.calledWith(T, "i1")).to.equal(true);
+    expect(MembershipManager.removeMembership.callCount).to.equal(2);
+    expect(CompanyMemberManager.removeMember.callCount).to.equal(2);
+    expect(
+      JwtHelper.revokeAllUserTokens.calledWith("owner@x.de", "company_deleted"),
+    ).to.equal(true);
+    expect(UserManager.deleteUser.callCount).to.equal(2);
+    expect(CompanyManager.deleteCompany.calledWith(T, CO)).to.equal(true);
+    expect(res).to.deep.equal({ deleted: CO });
+  });
+
+  it("deletes each offer's media files from storage before removing the offer", async () => {
+    OfferManager.getOffersByCompany.resolves([{ id: "o1" }]);
+    OfferMediaManager.getMediaByOffer.resolves([
+      {
+        id: "om1",
+        url: "http://x/api/kg/files/get?name=/public/offer-media/a.png",
+      },
+      {
+        id: "om2",
+        url: "http://x/api/kg/files/get?name=/public/offer-media/b.mp4",
+      },
+    ]);
+
+    await CompanyService.adminDeleteCompany(T, CO);
+
+    expect(OfferMediaManager.getMediaByOffer.calledWith(T, "o1")).to.equal(
+      true,
+    );
+    expect(
+      NextcloudManager.deleteFile.calledWith(T, "/public/offer-media/a.png"),
+    ).to.equal(true);
+    expect(
+      NextcloudManager.deleteFile.calledWith(T, "/public/offer-media/b.mp4"),
+    ).to.equal(true);
+    expect(OfferMediaManager.removeByOffer.calledWith(T, "o1")).to.equal(true);
+    expect(OfferManager.removeOffer.calledWith(T, "o1")).to.equal(true);
+  });
+
+  it("keeps a user who still has other memberships", async () => {
+    CompanyMemberManager.getMembersByCompany.resolves([
+      { userId: "owner@x.de" },
+    ]);
+    MembershipManager.getMembershipsByUserID.resolves([{ tenantId: "other" }]);
+    await CompanyService.adminDeleteCompany(T, CO);
+    expect(UserManager.deleteUser.called).to.equal(false);
+    expect(CompanyManager.deleteCompany.calledWith(T, CO)).to.equal(true);
   });
 });

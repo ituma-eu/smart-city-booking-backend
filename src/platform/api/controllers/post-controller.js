@@ -31,6 +31,7 @@ class PostController {
         tag: query.tag,
         q: query.q,
         limit: query.limit,
+        offset: query.offset,
       });
       return response.status(200).send(result);
     } catch (error) {
@@ -327,13 +328,11 @@ class PostController {
   static async _storeFile(tenantId, postId, file) {
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
     const bareName = `${postId}-${uuidv4()}-${safeName}`;
-    await NextcloudManager.createFile(
-      tenantId,
-      file.data,
-      bareName,
-      "public",
-      POST_MEDIA_DIR,
-    );
+    await NextcloudManager.createFile({
+      tenantID: tenantId,
+      file: { name: bareName, data: file.data },
+      subFolder: POST_MEDIA_DIR,
+    });
     return `${process.env.BACKEND_URL}/api/${tenantId}/files/get?name=/${POST_MEDIA_DIR}/${bareName}`;
   }
 

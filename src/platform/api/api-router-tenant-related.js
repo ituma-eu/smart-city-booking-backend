@@ -23,9 +23,18 @@ const PostController = require("./controllers/post-controller");
 const StudentController = require("./controllers/student-controller");
 const AccountDeletionController = require("./controllers/account-deletion-controller");
 const ApplicationController = require("./controllers/application-controller");
+const StatsController = require("./controllers/stats-controller");
+const AuditLogController = require("./controllers/audit-log-controller");
 const { optionalAuth } = require("../../middleware/auth-middleware");
+const AdminAccessController = require("./controllers/admin-access-controller");
+const requirePermission = require("../../commons/services/admin-access/require-permission");
+const requestContext = require("../../commons/utilities/request-context");
 
 const router = express.Router({ mergeParams: true });
+
+// Establish a per-request context so deep services (e.g. the audit log) can
+// attribute an action to the acting user without threading the request through.
+router.use((request, response, next) => requestContext.run(request, next));
 
 // COMPANIES
 // =========
@@ -69,6 +78,11 @@ router.post(
   AuthenticationController.isSignedIn,
   StudentController.addBookmark,
 );
+router.put(
+  "/students/me/bookmarks/:offerId",
+  AuthenticationController.isSignedIn,
+  StudentController.setBookmarkNote,
+);
 router.delete(
   "/students/me/bookmarks/:offerId",
   AuthenticationController.isSignedIn,
@@ -77,7 +91,20 @@ router.delete(
 router.get(
   "/admin/account-deletions",
   AuthenticationController.isSignedIn,
+  requirePermission("stats:view"),
   AccountDeletionController.getStats,
+);
+router.get(
+  "/admin/stats",
+  AuthenticationController.isSignedIn,
+  requirePermission("stats:view"),
+  StatsController.getStats,
+);
+router.get(
+  "/admin/audit-log",
+  AuthenticationController.isSignedIn,
+  requirePermission("audit:view"),
+  AuditLogController.list,
 );
 router.get(
   "/students/me/applications",
@@ -87,6 +114,7 @@ router.get(
 router.get(
   "/companies",
   AuthenticationController.isSignedIn,
+  requirePermission("companies:view"),
   CompanyController.getCompanies,
 );
 router.get(
@@ -197,18 +225,111 @@ router.post(
 router.post(
   "/companies/:id/verify",
   AuthenticationController.isSignedIn,
+  requirePermission("companies:moderate"),
   CompanyController.verify,
 );
 router.post(
   "/companies/:id/block",
   AuthenticationController.isSignedIn,
+  requirePermission("companies:moderate"),
   CompanyController.block,
+);
+router.post(
+  "/companies/:id/unverify",
+  AuthenticationController.isSignedIn,
+  requirePermission("companies:moderate"),
+  CompanyController.unverify,
+);
+router.post(
+  "/admin/companies",
+  AuthenticationController.isSignedIn,
+  requirePermission("companies:create"),
+  CompanyController.adminCreate,
+);
+router.delete(
+  "/admin/companies/:id",
+  AuthenticationController.isSignedIn,
+  requirePermission("companies:delete"),
+  CompanyController.adminDelete,
+);
+
+router.get(
+  "/admin/students",
+  AuthenticationController.isSignedIn,
+  requirePermission("students:view"),
+  StudentController.adminList,
+);
+router.get(
+  "/admin/students/:userId",
+  AuthenticationController.isSignedIn,
+  requirePermission("students:view"),
+  StudentController.adminGet,
+);
+router.put(
+  "/admin/students/:userId",
+  AuthenticationController.isSignedIn,
+  requirePermission("students:manage"),
+  StudentController.adminUpdate,
+);
+router.post(
+  "/admin/students/:userId/block",
+  AuthenticationController.isSignedIn,
+  requirePermission("students:manage"),
+  StudentController.adminBlock,
+);
+router.post(
+  "/admin/students/:userId/unblock",
+  AuthenticationController.isSignedIn,
+  requirePermission("students:manage"),
+  StudentController.adminUnblock,
+);
+router.delete(
+  "/admin/students/:userId",
+  AuthenticationController.isSignedIn,
+  requirePermission("students:manage"),
+  StudentController.adminDelete,
+);
+router.get(
+  "/admin/students/:userId/applications",
+  AuthenticationController.isSignedIn,
+  requirePermission("applications:view"),
+  StudentController.adminListApplications,
 );
 
 // TAXONOMIES
 // ==========
 
 router.get("/taxonomies", TaxonomyController.getTaxonomies);
+router.get(
+  "/admin/taxonomies",
+  AuthenticationController.isSignedIn,
+  requirePermission("taxonomies:view"),
+  TaxonomyController.adminList,
+);
+router.post(
+  "/admin/taxonomies",
+  AuthenticationController.isSignedIn,
+  requirePermission("taxonomies:manage"),
+  TaxonomyController.create,
+);
+router.put(
+  "/admin/taxonomies/reorder",
+  AuthenticationController.isSignedIn,
+  requirePermission("taxonomies:manage"),
+  TaxonomyController.reorder,
+);
+router.put(
+  "/admin/taxonomies/:id",
+  AuthenticationController.isSignedIn,
+  requirePermission("taxonomies:manage"),
+  TaxonomyController.update,
+);
+router.delete(
+  "/admin/taxonomies/:id",
+  AuthenticationController.isSignedIn,
+  requirePermission("taxonomies:manage"),
+  TaxonomyController.remove,
+);
 
 // POSTS / INFOS (CMS)
 // ==================
@@ -219,31 +340,37 @@ router.get("/posts/:slug", PostController.getBySlug);
 router.get(
   "/admin/posts",
   AuthenticationController.isSignedIn,
+  requirePermission("posts:view"),
   PostController.adminList,
 );
 router.post(
   "/admin/posts",
   AuthenticationController.isSignedIn,
+  requirePermission("posts:create"),
   PostController.create,
 );
 router.put(
   "/admin/posts/:id",
   AuthenticationController.isSignedIn,
+  requirePermission("posts:edit"),
   PostController.update,
 );
 router.post(
   "/admin/posts/:id/publish",
   AuthenticationController.isSignedIn,
+  requirePermission("posts:edit"),
   PostController.publish,
 );
 router.post(
   "/admin/posts/:id/unpublish",
   AuthenticationController.isSignedIn,
+  requirePermission("posts:edit"),
   PostController.unpublish,
 );
 router.delete(
   "/admin/posts/:id",
   AuthenticationController.isSignedIn,
+  requirePermission("posts:delete"),
   PostController.remove,
 );
 router.get(
@@ -254,21 +381,25 @@ router.get(
 router.post(
   "/admin/posts/:id/thumbnail",
   AuthenticationController.isSignedIn,
+  requirePermission("posts:edit"),
   PostController.uploadThumbnail,
 );
 router.delete(
   "/admin/posts/:id/thumbnail",
   AuthenticationController.isSignedIn,
+  requirePermission("posts:edit"),
   PostController.removeThumbnail,
 );
 router.post(
   "/admin/posts/:id/attachments",
   AuthenticationController.isSignedIn,
+  requirePermission("posts:edit"),
   PostController.uploadAttachment,
 );
 router.delete(
   "/admin/posts/:id/attachments/:attId",
   AuthenticationController.isSignedIn,
+  requirePermission("posts:edit"),
   PostController.removeAttachment,
 );
 
@@ -279,7 +410,20 @@ router.get("/settings", SettingsController.getSettings);
 router.put(
   "/settings",
   AuthenticationController.isSignedIn,
+  requirePermission("settings:manage"),
   SettingsController.updateSettings,
+);
+router.post(
+  "/settings/logo",
+  AuthenticationController.isSignedIn,
+  requirePermission("settings:manage"),
+  SettingsController.uploadLogo,
+);
+router.delete(
+  "/settings/logo",
+  AuthenticationController.isSignedIn,
+  requirePermission("settings:manage"),
+  SettingsController.removeLogo,
 );
 
 // OFFERS / PRAKTIKA
@@ -328,22 +472,32 @@ router.delete(
 router.get(
   "/admin/offers",
   AuthenticationController.isSignedIn,
+  requirePermission("offers:view"),
   OfferController.listModeration,
 );
 router.post(
   "/offers/:offerId/approve",
   AuthenticationController.isSignedIn,
+  requirePermission("offers:moderate"),
   OfferController.approveOffer,
 );
 router.post(
   "/offers/:offerId/reject",
   AuthenticationController.isSignedIn,
+  requirePermission("offers:moderate"),
   OfferController.rejectOffer,
 );
 router.post(
   "/offers/:offerId/deactivate",
   AuthenticationController.isSignedIn,
+  requirePermission("offers:moderate"),
   OfferController.deactivateOffer,
+);
+router.post(
+  "/offers/:offerId/reactivate",
+  AuthenticationController.isSignedIn,
+  requirePermission("offers:moderate"),
+  OfferController.reactivateOffer,
 );
 
 // company-side
@@ -376,6 +530,16 @@ router.delete(
   "/companies/:id/offers/:offerId",
   AuthenticationController.isSignedIn,
   OfferController.deleteOffer,
+);
+router.post(
+  "/companies/:id/offers/:offerId/archive",
+  AuthenticationController.isSignedIn,
+  OfferController.archiveOffer,
+);
+router.post(
+  "/companies/:id/offers/:offerId/reactivate",
+  AuthenticationController.isSignedIn,
+  OfferController.reactivateCompanyOffer,
 );
 router.get(
   "/companies/:id/offers/:offerId/media",
@@ -896,6 +1060,72 @@ router.delete(
   "/invitations/user/:userId",
   AuthenticationController.isSignedIn,
   InvitationController.deleteUserInvitation,
+);
+
+// ACCESS MANAGEMENT (ADMIN)
+// =========================
+router.get(
+  "/admin/access/permissions",
+  AuthenticationController.isSignedIn,
+  requirePermission("access:view"),
+  AdminAccessController.getPermissions,
+);
+router.get(
+  "/admin/me",
+  AuthenticationController.isSignedIn,
+  AdminAccessController.getMe,
+);
+router.get(
+  "/admin/roles",
+  AuthenticationController.isSignedIn,
+  requirePermission("access:view"),
+  AdminAccessController.listRoles,
+);
+router.post(
+  "/admin/roles",
+  AuthenticationController.isSignedIn,
+  requirePermission("access:manage"),
+  AdminAccessController.createRole,
+);
+router.put(
+  "/admin/roles/:id",
+  AuthenticationController.isSignedIn,
+  requirePermission("access:manage"),
+  AdminAccessController.updateRole,
+);
+router.delete(
+  "/admin/roles/:id",
+  AuthenticationController.isSignedIn,
+  requirePermission("access:manage"),
+  AdminAccessController.deleteRole,
+);
+router.get(
+  "/admin/admins",
+  AuthenticationController.isSignedIn,
+  requirePermission("access:view"),
+  AdminAccessController.listAdmins,
+);
+router.post(
+  "/admin/admins",
+  AuthenticationController.isSignedIn,
+  requirePermission("access:manage"),
+  AdminAccessController.inviteAdmin,
+);
+router.put(
+  "/admin/admins/:userId",
+  AuthenticationController.isSignedIn,
+  requirePermission("access:manage"),
+  AdminAccessController.changeAdminRole,
+);
+router.delete(
+  "/admin/admins/:userId",
+  AuthenticationController.isSignedIn,
+  requirePermission("access:manage"),
+  AdminAccessController.revokeAdmin,
+);
+router.post(
+  "/admin-invitations/:token/accept",
+  AdminAccessController.acceptInvitation,
 );
 
 router.use("/catalog", require("./routes/catalog.routes"));

@@ -8,6 +8,24 @@ class CompanyManager {
     return rawCompanies.map((doc) => doc.toEntity());
   }
 
+  // Paginated + name-searched company list for the admin list view. Returns the
+  // page plus the total count of matches (for the page controls).
+  static async getCompaniesPage(tenantId, { status, q, limit, offset } = {}) {
+    const query = { tenantId };
+    if (status) {
+      query.status = status;
+    }
+    if (q) {
+      query.name = { $regex: escapeRegex(q), $options: "i" };
+    }
+    const total = await CompanyModel.countDocuments(query);
+    const raw = await CompanyModel.find(query)
+      .sort({ name: 1 })
+      .skip(offset || 0)
+      .limit(limit);
+    return { items: raw.map((doc) => doc.toEntity()), total };
+  }
+
   static async getCompany(tenantId, id) {
     const rawCompany = await CompanyModel.findOne({ tenantId, id });
     if (!rawCompany) {
@@ -54,6 +72,16 @@ class CompanyManager {
 
   static async deleteCompany(tenantId, id) {
     await CompanyModel.deleteOne({ tenantId, id });
+  }
+  static async countByDistrict(tenantId) {
+    const rows = await CompanyModel.aggregate([
+      { $match: { tenantId, districtId: { $nin: [null, ""] } } },
+      { $group: { _id: "$districtId", count: { $sum: 1 } } },
+    ]);
+    return rows.map((row) => ({ districtId: row._id, count: row.count }));
+  }
+  static async countByField(tenantId, field, value) {
+    return CompanyModel.countDocuments({ tenantId, [field]: value });
   }
 }
 

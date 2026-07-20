@@ -3,7 +3,25 @@ const OfferModel = require("./models/offerModel");
 const { escapeRegex } = require("../utilities/regexUtils");
 
 const DEFAULT_SEARCH_LIMIT = 50;
-const MAX_SEARCH_LIMIT = 100;
+// Generous cap so a praktika map (public search, company profile, dashboard,
+// statistics) can render every matching marker; the /praktika list paginates
+// client-side over the full result set. Bump if a tenant ever exceeds this.
+const MAX_SEARCH_LIMIT = 2000;
+
+// Fields the admin moderation list may sort by (stored on the offer). Computed
+// columns like applicationCount / company name are not here — they would need a
+// cross-collection join to sort correctly under pagination.
+const MODERATION_SORT_FIELDS = ["title", "created", "publishedAt", "views"];
+
+function moderationSortSpec(filters) {
+  const field = MODERATION_SORT_FIELDS.includes(filters.sort)
+    ? filters.sort
+    : "created";
+  const dir = filters.dir === "asc" ? 1 : -1;
+  // Secondary key keeps pagination stable when the primary has ties (e.g. many
+  // offers with 0 views or a null publishedAt).
+  return field === "created" ? { created: dir } : { [field]: dir, created: -1 };
+}
 
 class OfferManager {
   static async getOffersByCompany(tenantId, companyId) {
@@ -54,8 +72,14 @@ class OfferManager {
   }
 
   static async listForModeration(tenantId, filters = {}) {
-    const query = { tenantId, status: { $in: ["In Prüfung", "Online"] } };
-    if (filters.status && ["In Prüfung", "Online"].includes(filters.status)) {
+    const query = {
+      tenantId,
+      status: { $in: ["In Prüfung", "Online", "Archiv"] },
+    };
+    if (
+      filters.status &&
+      ["In Prüfung", "Online", "Archiv"].includes(filters.status)
+    ) {
       query.status = filters.status;
     }
     if (filters.industryId) {
@@ -63,6 +87,16 @@ class OfferManager {
     }
     if (filters.q) {
       query.title = { $regex: escapeRegex(filters.q), $options: "i" };
+    }
+    // Opt-in pagination for the admin list view: with `limit` return the page
+    // plus the total match count; otherwise the full list (dashboard/stats).
+    if (Number.isFinite(filters.limit) && filters.limit > 0) {
+      const total = await OfferModel.countDocuments(query);
+      const raw = await OfferModel.find(query)
+        .sort(moderationSortSpec(filters))
+        .skip(filters.offset || 0)
+        .limit(filters.limit);
+      return { items: raw.map((doc) => doc.toEntity()), total };
     }
     const raw = await OfferModel.find(query).sort({ created: -1 });
     return raw.map((doc) => doc.toEntity());
@@ -151,6 +185,9 @@ class OfferManager {
       .limit(limit)
       .skip(skip);
     return raw.map((doc) => doc.toEntity());
+  }
+  static async countByField(tenantId, field, value) {
+    return OfferModel.countDocuments({ tenantId, [field]: value });
   }
 }
 

@@ -1,6 +1,4 @@
 const bunyan = require("bunyan");
-const PermissionService = require("../../../commons/services/permission-service");
-const { RolePermission } = require("../../../commons/entities/role/role");
 const CompanyService = require("../../../commons/services/company/company-service");
 const CompanyManager = require("../../../commons/data-managers/company-manager");
 const CompanyMemberManager = require("../../../commons/data-managers/company-member-manager");
@@ -63,9 +61,25 @@ class CompanyController {
       if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
         return response.sendStatus(403);
       }
-      const filter = COMPANY_STATUS_FILTERS.includes(request.query.status)
-        ? { status: request.query.status }
-        : {};
+      const status = COMPANY_STATUS_FILTERS.includes(request.query.status)
+        ? request.query.status
+        : undefined;
+      // Opt-in pagination: with `limit` the response is { items, total } for the
+      // admin list view; without it, the full array (dashboard/stats/dropdown).
+      const limit = parseInt(request.query.limit, 10);
+      if (Number.isFinite(limit) && limit > 0) {
+        const offset = Math.max(0, parseInt(request.query.offset, 10) || 0);
+        const q =
+          typeof request.query.q === "string" ? request.query.q.trim() : "";
+        const { items, total } = await CompanyManager.getCompaniesPage(
+          tenantId,
+          { status, q, limit: Math.min(limit, 100), offset },
+        );
+        return response
+          .status(200)
+          .send({ items: items.map(CompanyController._withLatLng), total });
+      }
+      const filter = status ? { status } : {};
       const companies = await CompanyManager.getCompanies(tenantId, filter);
       return response
         .status(200)
@@ -242,11 +256,20 @@ class CompanyController {
     try {
       const tenantId = request.params.tenant;
       const companyId = request.params.id;
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!CompanyController._isManager(access)) {
+        return response.sendStatus(403);
+      }
       if (
-        !(await CompanyController.isCompanyManager(
+        !(await CompanyController.hasAdminPermission(
+          access,
           request.user.id,
           tenantId,
-          companyId,
+          "companies:edit",
         ))
       ) {
         return response.sendStatus(403);
@@ -267,11 +290,20 @@ class CompanyController {
     try {
       const tenantId = request.params.tenant;
       const companyId = request.params.id;
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!CompanyController._isManager(access)) {
+        return response.sendStatus(403);
+      }
       if (
-        !(await CompanyController.isCompanyManager(
+        !(await CompanyController.hasAdminPermission(
+          access,
           request.user.id,
           tenantId,
-          companyId,
+          "companies:edit",
         ))
       ) {
         return response.sendStatus(403);
@@ -297,13 +329,11 @@ class CompanyController {
       }
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const fileName = `${companyId}-${safeName}`;
-      await NextcloudManager.createFile(
-        tenantId,
-        file.data,
-        fileName,
-        "public",
-        "public/logos",
-      );
+      await NextcloudManager.createFile({
+        tenantID: tenantId,
+        file: { name: fileName, data: file.data },
+        subFolder: "public/logos",
+      });
       const logoUrl = `${process.env.BACKEND_URL}/api/${tenantId}/files/get?name=/public/logos/${encodeURIComponent(fileName)}`;
       const company = await CompanyService.setCompanyLogo(
         tenantId,
@@ -324,11 +354,20 @@ class CompanyController {
     try {
       const tenantId = request.params.tenant;
       const companyId = request.params.id;
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!CompanyController._isManager(access)) {
+        return response.sendStatus(403);
+      }
       if (
-        !(await CompanyController.isCompanyManager(
+        !(await CompanyController.hasAdminPermission(
+          access,
           request.user.id,
           tenantId,
-          companyId,
+          "companies:edit",
         ))
       ) {
         return response.sendStatus(403);
@@ -374,11 +413,20 @@ class CompanyController {
     try {
       const tenantId = request.params.tenant;
       const companyId = request.params.id;
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!CompanyController._isManager(access)) {
+        return response.sendStatus(403);
+      }
       if (
-        !(await CompanyController.isCompanyManager(
+        !(await CompanyController.hasAdminPermission(
+          access,
           request.user.id,
           tenantId,
-          companyId,
+          "companies:edit",
         ))
       ) {
         return response.sendStatus(403);
@@ -408,13 +456,11 @@ class CompanyController {
       }
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const bareName = `${companyId}-${uuidv4()}-${safeName}`;
-      await NextcloudManager.createFile(
-        tenantId,
-        file.data,
-        bareName,
-        "public",
-        "public/media",
-      );
+      await NextcloudManager.createFile({
+        tenantID: tenantId,
+        file: { name: bareName, data: file.data },
+        subFolder: "public/media",
+      });
       const fileName = `public/media/${bareName}`;
       const url = `${process.env.BACKEND_URL}/api/${tenantId}/files/get?name=/${fileName}`;
       const type = isVideo ? "video" : "image";
@@ -434,11 +480,20 @@ class CompanyController {
     try {
       const tenantId = request.params.tenant;
       const companyId = request.params.id;
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!CompanyController._isManager(access)) {
+        return response.sendStatus(403);
+      }
       if (
-        !(await CompanyController.isCompanyManager(
+        !(await CompanyController.hasAdminPermission(
+          access,
           request.user.id,
           tenantId,
-          companyId,
+          "companies:edit",
         ))
       ) {
         return response.sendStatus(403);
@@ -493,6 +548,61 @@ class CompanyController {
     } catch (error) {
       logger.error("Could not block company", error);
       return sendError(response, error, "Could not block company");
+    }
+  }
+
+  static async unverify(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const company = await CompanyService.unverifyCompany(
+        tenantId,
+        request.params.id,
+      );
+      return response.status(200).send(CompanyController._withLatLng(company));
+    } catch (error) {
+      logger.error("Could not unverify company", error);
+      return sendError(response, error, "Could not unverify company");
+    }
+  }
+
+  static async adminCreate(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const result = await CompanyService.adminCreateCompany(
+        tenantId,
+        request.body,
+      );
+      return response.status(201).send({
+        id: result.company.id,
+        status: result.company.status,
+        invitation: result.invitation,
+      });
+    } catch (error) {
+      logger.error("Could not create company", error);
+      return sendError(response, error, "Could not create company");
+    }
+  }
+
+  static async adminDelete(request, response) {
+    try {
+      const tenantId = request.params.tenant;
+      if (!(await CompanyController.isTenantAdmin(request.user.id, tenantId))) {
+        return response.sendStatus(403);
+      }
+      const result = await CompanyService.adminDeleteCompany(
+        tenantId,
+        request.params.id,
+      );
+      return response.status(200).send(result);
+    } catch (error) {
+      logger.error("Could not delete company", error);
+      return sendError(response, error, "Could not delete company");
     }
   }
 
@@ -561,6 +671,16 @@ class CompanyController {
       if (!CompanyController._isManager(access)) {
         return response.sendStatus(403);
       }
+      if (
+        !(await CompanyController.hasAdminPermission(
+          access,
+          request.user.id,
+          tenantId,
+          "companies:edit",
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
       const branch = await CompanyService.createCompanyBranch(
         tenantId,
         companyId,
@@ -576,12 +696,20 @@ class CompanyController {
   static async updateBranch(request, response) {
     try {
       const { tenant: tenantId, id: companyId, branchId } = request.params;
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!CompanyController._canEditBranch(access, branchId)) {
+        return response.sendStatus(403);
+      }
       if (
-        !(await CompanyController.canEditBranch(
+        !(await CompanyController.hasAdminPermission(
+          access,
           request.user.id,
           tenantId,
-          companyId,
-          branchId,
+          "companies:edit",
         ))
       ) {
         return response.sendStatus(403);
@@ -610,6 +738,16 @@ class CompanyController {
       if (!CompanyController._isManager(access)) {
         return response.sendStatus(403);
       }
+      if (
+        !(await CompanyController.hasAdminPermission(
+          access,
+          request.user.id,
+          tenantId,
+          "companies:edit",
+        ))
+      ) {
+        return response.sendStatus(403);
+      }
       const branch = await CompanyService.removeCompanyBranch(
         tenantId,
         companyId,
@@ -626,12 +764,20 @@ class CompanyController {
   static async uploadBranchLogo(request, response) {
     try {
       const { tenant: tenantId, id: companyId, branchId } = request.params;
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!CompanyController._canEditBranch(access, branchId)) {
+        return response.sendStatus(403);
+      }
       if (
-        !(await CompanyController.canEditBranch(
+        !(await CompanyController.hasAdminPermission(
+          access,
           request.user.id,
           tenantId,
-          companyId,
-          branchId,
+          "companies:edit",
         ))
       ) {
         return response.sendStatus(403);
@@ -658,13 +804,11 @@ class CompanyController {
       );
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const fileName = `${branchId}-${safeName}`;
-      await NextcloudManager.createFile(
-        tenantId,
-        file.data,
-        fileName,
-        "public",
-        "public/branch-logos",
-      );
+      await NextcloudManager.createFile({
+        tenantID: tenantId,
+        file: { name: fileName, data: file.data },
+        subFolder: "public/branch-logos",
+      });
       const logoUrl = `${process.env.BACKEND_URL}/api/${tenantId}/files/get?name=/public/branch-logos/${encodeURIComponent(fileName)}`;
       const branch = await CompanyService.setBranchLogo(
         tenantId,
@@ -685,12 +829,20 @@ class CompanyController {
   static async removeBranchLogo(request, response) {
     try {
       const { tenant: tenantId, id: companyId, branchId } = request.params;
+      const access = await CompanyController.getBranchAccess(
+        request.user.id,
+        tenantId,
+        companyId,
+      );
+      if (!CompanyController._canEditBranch(access, branchId)) {
+        return response.sendStatus(403);
+      }
       if (
-        !(await CompanyController.canEditBranch(
+        !(await CompanyController.hasAdminPermission(
+          access,
           request.user.id,
           tenantId,
-          companyId,
-          branchId,
+          "companies:edit",
         ))
       ) {
         return response.sendStatus(403);
@@ -841,11 +993,11 @@ class CompanyController {
   }
 
   static async isTenantAdmin(userId, tenantId) {
-    return PermissionService._allowUpdateAny(
-      userId,
-      tenantId,
-      RolePermission.MANAGE_USERS,
-    );
+    // Admin status is governed by the standalone access management
+    // (admin_users), not the legacy booking RBAC. The instance owner is always
+    // an admin (see AdminAccessService.isAdmin).
+    const AdminAccessService = require("../../../commons/services/admin-access/admin-access-service");
+    return AdminAccessService.isAdmin(userId, tenantId);
   }
 
   static _isManager(access) {
@@ -889,12 +1041,7 @@ class CompanyController {
     return { isAdmin: false, member: isMember ? member : null };
   }
 
-  static async canEditBranch(userId, tenantId, companyId, branchId) {
-    const access = await CompanyController.getBranchAccess(
-      userId,
-      tenantId,
-      companyId,
-    );
+  static _canEditBranch(access, branchId) {
     if (access.isAdmin) {
       return true;
     }
@@ -905,6 +1052,29 @@ class CompanyController {
         member.branchId === "" ||
         member.branchId === branchId)
     );
+  }
+
+  static async canEditBranch(userId, tenantId, companyId, branchId) {
+    const access = await CompanyController.getBranchAccess(
+      userId,
+      tenantId,
+      companyId,
+    );
+    return CompanyController._canEditBranch(access, branchId);
+  }
+
+  /**
+   * Beyond the company/branch access check, a tenant-admin who is not a member
+   * of the company must also hold the granular admin permission for the action.
+   * Members and owners are governed by their branch scope alone; the instance
+   * owner always passes (AdminAccessService safety net).
+   */
+  static async hasAdminPermission(access, userId, tenantId, permission) {
+    if (!access.isAdmin || access.member !== null) {
+      return true;
+    }
+    const AdminAccessService = require("../../../commons/services/admin-access/admin-access-service");
+    return AdminAccessService.hasPermission(userId, tenantId, permission);
   }
 
   static async _deleteLogoFile(tenantId, logoUrl) {

@@ -24,6 +24,9 @@ class AccountDeletionManager {
     const raw = await AccountDeletionModel.find({ tenantId, role });
     return raw.map((doc) => doc.toEntity());
   }
+  static async countByField(tenantId, field, value) {
+    return AccountDeletionModel.countDocuments({ tenantId, [field]: value });
+  }
 }
 
 module.exports = AccountDeletionManager;

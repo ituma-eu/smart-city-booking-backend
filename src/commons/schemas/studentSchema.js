@@ -1,5 +1,6 @@
 const studentSchemaDefinition = {
   userId: { type: String, required: true },
+  tenantId: { type: String, required: true },
   birthDate: { type: String, default: "" },
   school: { type: String, default: "" },
   grade: { type: String, default: "" },

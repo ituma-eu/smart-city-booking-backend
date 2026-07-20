@@ -8,6 +8,7 @@ const memberInvitationSchemaDefinition = {
   lastName: { type: String, default: "" },
   phone: { type: String, default: "" },
   branchId: { type: String, default: "" },
+  isOwner: { type: Boolean, default: false },
   status: {
     type: String,
     enum: ["pending", "accepted", "revoked"],
