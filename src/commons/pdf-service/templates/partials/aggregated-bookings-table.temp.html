@@ -27,6 +27,12 @@
       <td class="label">Gesamt (netto)</td>
       <td class="value">{{netto}}</td>
     </tr>
+    {{#if coupon}}
+    <tr>
+      <td class="label">{{coupon.description}}</td>
+      <td class="value">{{coupon.discountLabel}}</td>
+    </tr>
+    {{/if}}
     {{/each}}
     <tr class="booking-sep">
       <td colspan="2"></td>
@@ -65,7 +71,8 @@
       <td colspan="{{../tableMeta.aggregatedInvoiceColumnCount}}" class="sub">
         {{#each items}}{{title}} ×{{amount}} ({{totalPrice}}){{#unless @last}}
         &nbsp;·&nbsp; {{/unless}}{{else}}Keine Buchungsobjekte
-        vorhanden.{{/each}}
+        vorhanden.{{/each}}{{#if coupon}} &nbsp;·&nbsp; {{coupon.description}}:
+        {{coupon.discountLabel}}{{/if}}
       </td>
     </tr>
     {{/each}}
@@ -75,8 +82,14 @@
       </td>
     </tr>
     <tr class="brutto">
+      {{#if tableMeta.useSplitAggregatedInvoiceTotals}}
       <td colspan="{{tableMeta.aggregatedInvoiceLabelColspan}}">Gesamt (brutto)</td>
       <td class="num">{{totals.brutto}}</td>
+      {{else}}
+      <td colspan="{{tableMeta.aggregatedInvoiceColumnCount}}">
+        Gesamt (brutto) <span class="num">{{totals.brutto}}</span>
+      </td>
+      {{/if}}
     </tr>
   </tbody>
 </table>
@@ -105,10 +118,14 @@
           {{else}}
           <li>Keine Buchungsobjekte vorhanden.</li>
           {{/each}}
+          {{#if coupon}}
+          <li>{{coupon.description}}: {{coupon.discountLabel}}</li>
+          {{/if}}
         </ul>
       </td>
     </tr>
     {{/each}}
+    {{#if tableMeta.useSplitAggregatedInvoiceTotals}}
     <tr class="netto">
       <td colspan="{{tableMeta.aggregatedInvoiceLabelColspan}}">Gesamt (netto)</td>
       <td class="num">{{totals.netto}}</td>
@@ -121,6 +138,23 @@
       <td colspan="{{tableMeta.aggregatedInvoiceLabelColspan}}">Gesamt (brutto)</td>
       <td class="num">{{totals.brutto}}</td>
     </tr>
+    {{else}}
+    <tr class="netto">
+      <td colspan="{{tableMeta.aggregatedInvoiceColumnCount}}">
+        Gesamt (netto) <span class="num">{{totals.netto}}</span>
+      </td>
+    </tr>
+    <tr class="mwst">
+      <td colspan="{{tableMeta.aggregatedInvoiceColumnCount}}">
+        zzgl. MwSt. <span class="num">{{totals.vat}}</span>
+      </td>
+    </tr>
+    <tr class="brutto">
+      <td colspan="{{tableMeta.aggregatedInvoiceColumnCount}}">
+        Gesamt (brutto) <span class="num">{{totals.brutto}}</span>
+      </td>
+    </tr>
+    {{/if}}
   </tbody>
 </table>
 {{/if}}

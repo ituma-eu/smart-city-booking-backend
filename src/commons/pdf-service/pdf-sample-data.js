@@ -87,7 +87,12 @@ const SAMPLE_BOOKING = {
 function buildBaseSampleData(
   layout,
   tableMeta,
-  { negative = false, tableClass, includePayment = false, bookingOverrides = {} } = {},
+  {
+    negative = false,
+    tableClass,
+    includePayment = false,
+    bookingOverrides = {},
+  } = {},
 ) {
   const items = buildSampleItems({ negative });
   const bruttoEur = sumItems(items);
@@ -123,7 +128,15 @@ function buildBaseSampleData(
     compactMetaHtml: buildCompactMetaHtml(booking, resolvedTableMeta),
   });
 
-  return { items, totals, coupon, booking, renderedTable, bruttoEur, tableMeta: resolvedTableMeta };
+  return {
+    items,
+    totals,
+    coupon,
+    booking,
+    renderedTable,
+    bruttoEur,
+    tableMeta: resolvedTableMeta,
+  };
 }
 
 function buildReceiptSampleData(
@@ -203,7 +216,15 @@ function buildCancellationSampleData(
     cancellationDate: formatters.formatDate(new Date()),
     cancellationReason: "Veranstaltung wurde abgesagt",
     alreadyPaid: true,
+    daysBeforeStartLabel: "20",
+    suggestedRefundPercentage: 100,
+    refundPercentage: 100,
+    calculationMode: "Automatisch nach Mandantenregel",
+    adminOverride: false,
+    isFullRefund: true,
+    hasCancellationFee: false,
     refundAmount: formatters.formatCurrency(bruttoEur),
+    cancellationFee: formatters.formatCurrency(0),
     customerBankDetails:
       '<div class="information customer-bank-details">' +
       "<strong>Bankverbindung für die Rückerstattung:</strong><br />" +
