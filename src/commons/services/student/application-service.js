@@ -5,10 +5,12 @@ const StudentManager = require("../../data-managers/student-manager");
 const UserManager = require("../../data-managers/user-manager");
 const CompanyBranchManager = require("../../data-managers/company-branch-manager");
 const CompanyManager = require("../../data-managers/company-manager");
+const CompanyMemberManager = require("../../data-managers/company-member-manager");
 const TaxonomyTermManager = require("../../data-managers/taxonomy-term-manager");
 const PlatformSettingsService = require("../platform-settings-service");
 const { NextcloudManager } = require("../../data-managers/file-manager");
 const AuditLogService = require("../audit-log-service");
+const ApplicationNotificationMail = require("./application-notification-mail");
 
 const MOTIVATION_MAX = 5000;
 
@@ -47,6 +49,8 @@ function toListDto(tenantId, application, offer, statusName) {
   return {
     id: application.id,
     offerId: application.offerId,
+    companyId: application.companyId,
+    isUnsolicited: application.isUnsolicited === true,
     statusId: application.status,
     status: statusName,
     createdAt: application.created,
@@ -77,6 +81,7 @@ function toCompanyDto(
     id: application.id,
     offerId: application.offerId,
     offerTitle: offer ? offer.title : null,
+    isUnsolicited: application.isUnsolicited === true,
     branchId: branchId !== undefined ? branchId : application.branchId,
     branchName: branchName || null,
     applicant: {
@@ -113,6 +118,19 @@ function isDeadlinePassed(deadline) {
 }
 
 class ApplicationService {
+  static async _companyManagerRecipients(tenantId, companyId, branchId) {
+    const members = await CompanyMemberManager.getMembersByCompany(
+      tenantId,
+      companyId,
+    );
+    const scope = branchId || "";
+    const emails = members
+      .filter((m) => m.isOwner === true || !m.branchId || m.branchId === scope)
+      .map((m) => m.userId)
+      .filter(Boolean);
+    return [...new Set(emails)];
+  }
+
   static async submitApplication(tenantId, userId, offerId, payload) {
     const data = payload || {};
 
@@ -206,6 +224,122 @@ class ApplicationService {
       "create",
       `${user.id} hat sich auf „${offer.title}" beworben`,
     );
+
+    (async () => {
+      const recipients = await ApplicationService._companyManagerRecipients(
+        tenantId,
+        offer.companyId,
+        offer.branchId || "",
+      );
+      await ApplicationNotificationMail.sendApplicationReceived({
+        recipients,
+        companyName: company.name,
+        applicantName: `${user.firstName} ${user.lastName}`.trim(),
+        offerTitle: offer.title,
+        isUnsolicited: false,
+      });
+    })().catch((error) =>
+      AuditLogService.record(
+        tenantId,
+        "error",
+        `Benachrichtigung über neue Bewerbung konnte nicht gesendet werden: ${error?.message || error}`,
+      ),
+    );
+
+    return { id: application.id };
+  }
+
+  static async submitUnsolicitedApplication(
+    tenantId,
+    userId,
+    companyId,
+    payload,
+  ) {
+    const data = payload || {};
+
+    const student = await StudentManager.getStudentByUser(userId);
+    if (!student || student.tenantId !== tenantId) {
+      throw { message: "Only students can apply", status: 403 };
+    }
+
+    if (data.consent !== true) {
+      throw { message: "Consent is required", status: 400 };
+    }
+
+    const motivation = String(data.motivation || "").trim();
+    if (motivation.length > MOTIVATION_MAX) {
+      throw {
+        message: `Motivation must be at most ${MOTIVATION_MAX} characters`,
+        status: 400,
+      };
+    }
+
+    const company = await CompanyManager.getCompany(tenantId, companyId);
+    if (!company || company.status === "blocked") {
+      throw { message: "Company not found", status: 404 };
+    }
+    if (company.acceptsUnsolicitedApplications !== true) {
+      throw {
+        message: "This company is not accepting unsolicited applications",
+        status: 409,
+      };
+    }
+
+    const user = await UserManager.getUserBy({ id: userId }, false);
+    if (!user) {
+      throw { message: "User not found", status: 404 };
+    }
+
+    const settings = await PlatformSettingsService.getSettings(tenantId);
+    const now = Date.now();
+    const application = await ApplicationManager.storeApplication({
+      id: uuidv4(),
+      tenantId,
+      offerId: "",
+      companyId,
+      branchId: "",
+      isUnsolicited: true,
+      studentUserId: userId,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.id,
+      phone: user.phone,
+      birthDate: student.birthDate,
+      motivation,
+      consent: true,
+      consentAt: now,
+      status: settings.defaultApplicationStatus,
+      documents: [],
+      created: now,
+    });
+
+    await AuditLogService.record(
+      tenantId,
+      "create",
+      `${user.id} hat eine Initiativbewerbung bei „${company.name}" abgeschickt`,
+    );
+
+    (async () => {
+      const recipients = await ApplicationService._companyManagerRecipients(
+        tenantId,
+        companyId,
+        "",
+      );
+      await ApplicationNotificationMail.sendApplicationReceived({
+        recipients,
+        companyName: company.name,
+        applicantName: `${user.firstName} ${user.lastName}`.trim(),
+        offerTitle: null,
+        isUnsolicited: true,
+      });
+    })().catch((error) =>
+      AuditLogService.record(
+        tenantId,
+        "error",
+        `Benachrichtigung über neue Initiativbewerbung konnte nicht gesendet werden: ${error?.message || error}`,
+      ),
+    );
+
     return { id: application.id };
   }
 
@@ -306,6 +440,9 @@ class ApplicationService {
         throw { message: "Out of branch scope", status: 403 };
       }
     }
+    const oldStatusName =
+      statusTerms.find((term) => term.id === application.status)?.name ||
+      application.status;
     await ApplicationManager.updateStatus(tenantId, applicationId, status);
     const statusName = statusTerms.find((term) => term.id === status).name;
     await AuditLogService.record(
@@ -313,6 +450,31 @@ class ApplicationService {
       "update",
       `Bewerbung von ${application.email} auf „${statusName}" gesetzt`,
     );
+
+    (async () => {
+      const company = await CompanyManager.getCompany(
+        tenantId,
+        application.companyId,
+      );
+      const offer = application.offerId
+        ? await OfferManager.getOffer(tenantId, application.offerId)
+        : null;
+      await ApplicationNotificationMail.sendApplicationStatusChanged({
+        to: application.email,
+        applicantName: application.firstName,
+        companyName: company ? company.name : null,
+        offerTitle: offer ? offer.title : null,
+        oldStatus: oldStatusName,
+        newStatus: statusName,
+      });
+    })().catch((error) =>
+      AuditLogService.record(
+        tenantId,
+        "error",
+        `Statusbenachrichtigung an die Bewerber*in konnte nicht gesendet werden: ${error?.message || error}`,
+      ),
+    );
+
     return { id: applicationId, status };
   }
 
